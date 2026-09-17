@@ -11,8 +11,9 @@ Cargo.lock pins their resolution. No Python or Node.js tooling is used.
 
 Updates: review release notes and API changes, update the exact manifest
 versions, regenerate Cargo.lock, and repeat offline tests plus the opt-in USB
-integration test. Audit transitive license notices before distributing a
-release package. Source references informed the USB/wire protocol; the old
+integration test. The Windows release packaging script includes license/notice
+files for resolved Windows dependencies and Rust runtime notices; review these
+when updating dependencies. Source references informed the USB/wire protocol; the old
 GPL hackrf_tcp implementation was not copied into this project.
 
 An unmodified native rtl_433 test client was downloaded into ignored `.local/`:

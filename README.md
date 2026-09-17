@@ -12,6 +12,13 @@ libhackrf/libusb DLL is required.
 
 ## Try it on this computer
 
+Windows x64 packages are published on the
+[GitHub releases page](https://github.com/Wixely/mayhem_tcp/releases).
+Extract the ZIP, select HackRF mode on the PortaPack, then run
+`mayhem_tcp.exe --agc --digital-agc -p 12346` and connect your client to
+`127.0.0.1:12346`. Prereleases are experimental and unsigned. Each package
+includes documentation, dependency licenses and a separate SHA-256 checksum.
+
 Select **HackRF mode** on the PortaPack and close any other application using
 the device. From this directory:
 

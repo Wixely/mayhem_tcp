@@ -1,0 +1,63 @@
+name: Windows release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out tagged source
+        run: |
+          if ($env:GITHUB_REF_TYPE -ne 'tag') { throw 'Select a version tag when running this workflow manually' }
+          git init .
+          if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+          git remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+          git fetch --depth=1 origin $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'git fetch failed' }
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'git checkout failed' }
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Toolchain installation failed' }
+          rustup override set 1.98.1
+          if ($LASTEXITCODE -ne 0) { throw 'Toolchain selection failed' }
+      - name: Check version and run offline checks
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object { $_.name -eq 'mayhem_tcp' }).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag does not match Cargo.toml version' }
+          cargo fmt --check
+          if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
+          cargo test --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          cargo clippy --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
+      - name: Build and package
+        run: ./scripts/build-release.ps1
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $assets = @(Get-ChildItem .local/releases -File | Where-Object { $_.Extension -in '.zip', '.sha256' } | Select-Object -ExpandProperty FullName)
+          $existing = @(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot list releases' }
+          if ($env:GITHUB_REF_NAME -notin $existing) {
+            gh release create $env:GITHUB_REF_NAME --verify-tag --prerelease --title "mayhem_tcp $env:GITHUB_REF_NAME" --notes-file docs/release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
+          }
+          gh release upload $env:GITHUB_REF_NAME @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }

@@ -7,6 +7,15 @@ Linux Rust toolchain or Docker executable available in the checked environment.
 
 ## Windows interactive
 
+Download a Windows x64 ZIP from the GitHub releases page, or build it locally.
+`powershell -File scripts/build-release.ps1` builds and packages the executable,
+documentation and dependency licenses under ignored `.local/releases`, with a
+SHA-256 checksum. The script remaps build paths and omits debug symbols.
+The GitHub Actions workflow uses Rust 1.98.1 on Windows Server 2022 and publishes
+a prerelease when a matching `v<version>` tag is pushed. To rerun it manually,
+select that tag in the workflow dispatcher. Hardware tests are opt-in and do not
+run on hosted CI. The executable is unsigned.
+
 Build with `cargo build --release --locked`. Run `target\release\mayhem_tcp.exe`.
 The MSVC build statically links the C runtime and requires no libhackrf/libusb
 DLL. The existing WinUSB device driver is still required. No driver installation
