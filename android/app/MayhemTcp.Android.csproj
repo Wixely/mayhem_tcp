@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <SupportedOSPlatformVersion>28</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>com.wixely.mayhemtcp</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.0-android-test1</ApplicationDisplayVersion>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">android-arm64</RuntimeIdentifier>
+    <AndroidPackageFormats>apk</AndroidPackageFormats>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <AndroidUseSharedRuntime>false</AndroidUseSharedRuntime>
+    <!-- NativeAOT Android interop is experimental; the DSP/USB engine is native Rust. -->
+    <PublishAot>false</PublishAot>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <AndroidLinkMode>None</AndroidLinkMode>
+    <DebugType>none</DebugType>
+    <AndroidEnableMarshalMethods>false</AndroidEnableMarshalMethods>
+  </PropertyGroup>
+  <ItemGroup>
+    <AndroidNativeLibrary Include="../build/jni/arm64-v8a/libmayhem_android.so" Abi="arm64-v8a" Condition="'$(RuntimeIdentifier)' == 'android-arm64'" />
+    <AndroidNativeLibrary Include="../build/jni/x86_64/libmayhem_android.so" Abi="x86_64" Condition="'$(RuntimeIdentifier)' == 'android-x64'" />
+  </ItemGroup>
+</Project>

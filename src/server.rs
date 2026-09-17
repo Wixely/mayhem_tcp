@@ -23,9 +23,18 @@ fn stopped(local: &AtomicBool, global: &AtomicBool) -> bool {
 }
 
 pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<()> {
+    let serial = config.serial.clone();
+    run_with_radio(config, shutdown, move || Radio::open(serial.as_deref()))
+}
+
+pub fn run_with_radio(
+    config: Config,
+    shutdown: Arc<AtomicBool>,
+    open_radio: impl Fn() -> Result<Radio> + Clone + Send + 'static,
+) -> Result<()> {
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
-    eprintln!(
+    crate::diagnostic!(
         "mayhem_tcp listening on {} (one RX client; Ctrl+C to stop)",
         listener.local_addr()?
     );
@@ -34,8 +43,8 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<()> {
     while !shutdown.load(Ordering::Relaxed) {
         if active.as_ref().is_some_and(|h| h.is_finished()) {
             match active.take().unwrap().join() {
-                Ok(Ok(())) => eprintln!("Session closed; ready for another client"),
-                Ok(Err(error)) => eprintln!("Session ended: {error}"),
+                Ok(Ok(())) => crate::diagnostic!("Session closed; ready for another client"),
+                Ok(Err(error)) => crate::diagnostic!("Session ended: {error}"),
                 Err(_) => return Err("Session thread panicked".into()),
             }
             if config.sessions != 0 && sessions >= config.sessions {
@@ -51,7 +60,10 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<()> {
                 sessions += 1;
                 let options = config.clone();
                 let shutdown = shutdown.clone();
-                active = Some(thread::spawn(move || session(stream, options, &shutdown)));
+                let open_radio = open_radio.clone();
+                active = Some(thread::spawn(move || {
+                    session(stream, options, &shutdown, open_radio)
+                }));
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(20))
@@ -68,7 +80,7 @@ pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<()> {
     if let Some(handle) = active {
         let _ = handle.join();
     }
-    eprintln!("mayhem_tcp stopped");
+    crate::diagnostic!("mayhem_tcp stopped");
     Ok(())
 }
 
@@ -77,13 +89,18 @@ struct Block {
     bytes: Vec<u8>,
 }
 
-fn session(mut stream: TcpStream, config: Config, global: &AtomicBool) -> Result<()> {
+fn session(
+    mut stream: TcpStream,
+    config: Config,
+    global: &AtomicBool,
+    open_radio: impl FnOnce() -> Result<Radio>,
+) -> Result<()> {
     // Windows accepted sockets inherit the nonblocking listener's mode.
     stream.set_nonblocking(false)?;
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(Duration::from_millis(200)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-    let radio = Radio::open(config.serial.as_deref())?;
+    let radio = open_radio()?;
     stream.write_all(&protocol::greeting())?;
     let reader = stream.try_clone()?;
     let writer = stream.try_clone()?;
@@ -94,13 +111,13 @@ fn session(mut stream: TcpStream, config: Config, global: &AtomicBool) -> Result
     thread::scope(|scope| {
         scope.spawn(|| {
             if let Err(error) = read_commands(reader, commands_tx, &local, global) {
-                eprintln!("Command connection ended: {error}");
+                crate::diagnostic!("Command connection ended: {error}");
             }
             local.store(true, Ordering::Relaxed);
         });
         scope.spawn(|| {
             if let Err(error) = write_samples(writer, data_rx, &generation, &local, global) {
-                eprintln!("Sample connection ended: {error}");
+                crate::diagnostic!("Sample connection ended: {error}");
             }
             local.store(true, Ordering::Relaxed);
         });
@@ -199,7 +216,7 @@ fn capture(
         let mut agc = Controller::new(hardware_rate, gains);
         let mut filter = Decimator::new(divisor);
         let mut digital = crate::digital_agc::DigitalAgc::new(settings.rate);
-        eprintln!("Digital AGC={}", settings.digital_agc);
+        crate::diagnostic!("Digital AGC={}", settings.digital_agc);
         let mut reader = radio.reader()?;
         radio.start()?;
         // Discard the first transfer after each restart to allow RF settling.
@@ -209,7 +226,7 @@ fn capture(
             // Bound work per USB block even if the client floods commands.
             for command in commands.try_iter().take(64) {
                 if let Some(warning) = settings.command(command, config.allow_bias_tee)? {
-                    eprintln!("Command 0x{:02x}: {warning}", command.id);
+                    crate::diagnostic!("Command 0x{:02x}: {warning}", command.id);
                 }
             }
             if settings.requires_restart(&previous) {
@@ -217,7 +234,7 @@ fn capture(
             }
             if settings.digital_agc != previous.digital_agc {
                 digital = crate::digital_agc::DigitalAgc::new(settings.rate);
-                eprintln!("Digital AGC={}", settings.digital_agc);
+                crate::diagnostic!("Digital AGC={}", settings.digital_agc);
             }
             if settings.auto_gain != previous.auto_gain
                 || (!settings.auto_gain && settings.gain_tenths != previous.gain_tenths)
@@ -226,7 +243,7 @@ fn capture(
                 radio.set_gains_live(gains, desired)?;
                 gains = desired;
                 agc = Controller::new(hardware_rate, gains);
-                eprintln!(
+                crate::diagnostic!(
                     "Live gain mode={} LNA={} VGA={}",
                     if settings.auto_gain { "auto" } else { "manual" },
                     gains.lna,
@@ -246,9 +263,13 @@ fn capture(
                 if let Some(adjustment) = agc.observe(&input[..count]) {
                     radio.set_gains_live(gains, adjustment.gains)?;
                     gains = adjustment.gains;
-                    eprintln!(
+                    crate::diagnostic!(
                         "AGC {}: rms={:.2} peak={} LNA={} VGA={}",
-                        adjustment.reason, adjustment.rms, adjustment.peak, gains.lna, gains.vga
+                        adjustment.reason,
+                        adjustment.rms,
+                        adjustment.peak,
+                        gains.lna,
+                        gains.vga
                     );
                 }
             }
@@ -271,7 +292,7 @@ fn capture(
         radio.stop()?;
         drop(reader);
     }
-    eprintln!(
+    crate::diagnostic!(
         "RX session: USB bytes={input_bytes} output bytes={output_bytes} elapsed={:.3}s",
         started.elapsed().as_secs_f64()
     );

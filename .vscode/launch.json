@@ -13,6 +13,17 @@
       "preLaunchTask": "Build mayhem_tcp"
     },
     {
+      "name": "mayhem_tcp (LAN 0.0.0.0, both AGCs)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/mayhem_tcp.exe",
+      "args": ["-a", "0.0.0.0", "-p", "12346", "--agc", "--digital-agc"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "environment": [{"name": "RUST_BACKTRACE", "value": "1"}],
+      "preLaunchTask": "Build mayhem_tcp"
+    },
+    {
       "name": "mayhem_tcp (localhost, manual gain)",
       "type": "cppvsdbg",
       "request": "launch",

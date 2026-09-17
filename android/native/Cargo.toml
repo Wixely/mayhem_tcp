@@ -1,0 +1,17 @@
+[package]
+name = "mayhem_android"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mayhem_tcp = { path = "../.." }
+nusb = "=0.2.7"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

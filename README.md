@@ -53,6 +53,12 @@ cargo build --release --locked
 
 ## Scope and limitations
 
+An experimental Android 16 USB-host app is available on the Android development
+branch. See [Android build and test instructions](android/README.md) for the
+ARM64 test APK, foreground service and WireGuard setup. A short physical-device
+stream over WireGuard has been verified at 2.048 MS/s; direct phone-LAN access
+did not work in that test setup and remains unresolved.
+
 - One receive client at a time. No transmission or firmware-writing features.
 - Output rates **250 kS/s through 3.2 MS/s**; USB capture uses a power-of-two
   multiple at least 8 MS/s, followed by a real low-pass decimator.
@@ -113,6 +119,11 @@ Connect your rtl_tcp client to **127.0.0.1:12346**. The debug profiles use this 
 client commands can override them. Use **mayhem_tcp (localhost, manual gain)**
 to start at 32 dB with both AGCs off. The information-only USB probe remains
 available in the launch selector.
+
+For LAN testing, select **mayhem_tcp (LAN 0.0.0.0, both AGCs)** and press **F5**.
+It listens on all IPv4 interfaces at port **12346**. Connect the remote client
+to this computer's LAN IP and port **12346**; allow inbound TCP on that port
+in Windows Firewall if needed.
 
 Use **Terminal > Run Task > Test mayhem_tcp** for offline tests. For the opt-in
 hardware suite, stop the debug server and any other HackRF application, then run

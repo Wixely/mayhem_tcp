@@ -14,6 +14,12 @@ pub struct Radio {
     interface: Interface,
 }
 impl Radio {
+    #[cfg(target_os = "android")]
+    pub fn open(_serial: Option<&str>) -> Result<Self> {
+        Err("Android requires an app-granted USB descriptor; use Radio::from_device".into())
+    }
+
+    #[cfg(not(target_os = "android"))]
     pub fn open(serial: Option<&str>) -> Result<Self> {
         let devices: Vec<_> = nusb::list_devices()
             .wait()?
@@ -31,6 +37,14 @@ impl Radio {
             .into());
         }
         let device = devices[0].open().wait()?;
+        Self::from_device(device)
+    }
+
+    pub fn from_device(device: Device) -> Result<Self> {
+        let descriptor = device.device_descriptor();
+        if descriptor.vendor_id() != 0x1d50 || descriptor.product_id() != 0x6089 {
+            return Err("USB device is not a HackRF One in HackRF mode".into());
+        }
         let interface = device.claim_interface(0).wait()?;
         let api = device.device_descriptor().device_version();
         let radio = Self {
@@ -38,7 +52,7 @@ impl Radio {
             interface,
         };
         let firmware = radio.get(15, 0, 255)?;
-        eprintln!(
+        crate::diagnostic!(
             "HackRF firmware={} USB API=0x{api:04x}",
             String::from_utf8_lossy(&firmware).trim_end_matches('\0')
         );
@@ -101,7 +115,7 @@ impl Radio {
                 return Err("HackRF rejected gain".into());
             }
         }
-        eprintln!(
+        crate::diagnostic!(
             "Configured frequency={} Hz output={} S/s USB={} S/s decimation={} LNA={} VGA={} bias={} auto_gain={}",
             settings.frequency,
             settings.rate,
@@ -140,10 +154,10 @@ impl Radio {
 impl Drop for Radio {
     fn drop(&mut self) {
         if let Err(error) = self.stop() {
-            eprintln!("RX cleanup failed: {error}");
+            crate::diagnostic!("RX cleanup failed: {error}");
         }
         if let Err(error) = self.set(23, 0, 0, &[]) {
-            eprintln!("Antenna-power cleanup failed: {error}");
+            crate::diagnostic!("Antenna-power cleanup failed: {error}");
         }
     }
 }

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod diagnostics;
 pub mod digital_agc;
 pub mod dsp;
 pub mod protocol;

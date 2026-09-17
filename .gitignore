@@ -1,2 +1,5 @@
 **/target/
 .local/
+android/build/
+android/app/bin/
+android/app/obj/
