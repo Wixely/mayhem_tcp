@@ -1,0 +1,19 @@
+[Unit]
+Description=mayhem_tcp HackRF receive server
+After=network.target
+
+[Service]
+Type=simple
+User=mayhem-tcp
+SupplementaryGroups=hackrf
+ExecStart=/usr/local/bin/mayhem_tcp -a 127.0.0.1 -p 1234
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

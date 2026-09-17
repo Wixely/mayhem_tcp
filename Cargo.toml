@@ -1,0 +1,23 @@
+[package]
+name = "mayhem_tcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "Experimental rtl_tcp receive server for HackRF with Mayhem firmware"
+
+[dependencies]
+nusb = "=0.2.7"
+ctrlc = { version = "=3.5.2", features = ["termination"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "=0.8.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Keep debug symbols while allowing real-time DSP under the debugger.
+[profile.dev]
+opt-level = 2

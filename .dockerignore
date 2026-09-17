@@ -1,0 +1,6 @@
+target
+**/target
+.local
+.git
+.vscode
+tools

@@ -1,0 +1,7 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {"name": "mayhem_tcp (localhost)", "type": "cppvsdbg", "request": "launch", "program": "${workspaceFolder}/target/debug/mayhem_tcp.exe", "args": [], "cwd": "${workspaceFolder}", "preLaunchTask": "Build mayhem_tcp"},
+    {"name": "USB probe (information only)", "type": "cppvsdbg", "request": "launch", "program": "${workspaceFolder}/tools/usb-probe/target/debug/mayhem-usb-probe.exe", "args": [], "cwd": "${workspaceFolder}", "preLaunchTask": "Build USB probe"}
+  ]
+}

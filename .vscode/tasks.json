@@ -1,0 +1,8 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {"label": "Build mayhem_tcp", "type": "process", "command": "cargo", "args": ["build", "--locked"], "problemMatcher": ["$rustc"], "group": {"kind": "build", "isDefault": true}},
+    {"label": "Test mayhem_tcp", "type": "process", "command": "cargo", "args": ["test", "--release", "--locked"], "problemMatcher": ["$rustc"]},
+    {"label": "Build USB probe", "type": "process", "command": "cargo", "args": ["build", "--locked", "--manifest-path", "tools/usb-probe/Cargo.toml"], "problemMatcher": ["$rustc"]}
+  ]
+}
