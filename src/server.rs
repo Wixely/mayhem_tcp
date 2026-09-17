@@ -32,6 +32,7 @@ pub fn run_with_radio(
     shutdown: Arc<AtomicBool>,
     open_radio: impl Fn() -> Result<Radio> + Clone + Send + 'static,
 ) -> Result<()> {
+    crate::config::validate_queue_blocks(config.queue_blocks)?;
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     crate::diagnostic!(
@@ -107,7 +108,8 @@ fn session(
     let local = AtomicBool::new(false);
     let generation = AtomicU64::new(0);
     let (commands_tx, commands_rx) = mpsc::sync_channel(64);
-    let (data_tx, data_rx) = mpsc::sync_channel::<Block>(32);
+    let (data_tx, data_rx) = mpsc::sync_channel::<Block>(config.queue_blocks);
+    crate::diagnostic!("Output queue capacity={} blocks", config.queue_blocks);
     thread::scope(|scope| {
         scope.spawn(|| {
             if let Err(error) = read_commands(reader, commands_tx, &local, global) {
@@ -225,8 +227,14 @@ fn capture(
             let previous = settings.clone();
             // Bound work per USB block even if the client floods commands.
             for command in commands.try_iter().take(64) {
-                if let Some(warning) = settings.command(command, config.allow_bias_tee)? {
-                    crate::diagnostic!("Command 0x{:02x}: {warning}", command.id);
+                match settings.command(command, config.allow_bias_tee) {
+                    Ok(Some(warning)) => {
+                        crate::diagnostic!("Command 0x{:02x}: {warning}", command.id)
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        crate::diagnostic!("Command 0x{:02x} ignored: {error}", command.id)
+                    }
                 }
             }
             if settings.requires_restart(&previous) {

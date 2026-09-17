@@ -134,6 +134,16 @@ reconnect, invalid-command and stalled-reader regression checks.
 
 ### Remaining verification
 
+Compatibility update reviewed on 2026-09-17: all 19 offline tests pass, including
+64× decimation passband/alias rejection and fragmented-stream equivalence for
+240 kS/s, queue-capacity bounds, and invalid-setting rejection without mutation.
+Desktop and Android native Clippy and formatting checks passed. The ARM64 APK
+built without warnings/errors and passed the artifact scan. CLI help and rejection
+of a zero queue capacity were checked. The live regression suite now checks 240
+kS/s, a 64-block queue, and continued streaming after invalid commands; it has
+not been rerun against hardware for this update. Android buffer persistence and
+the updated native-call arguments need a physical-device run with this APK.
+
 - Only 250 kS/s, 2 MS/s, 2.048 MS/s and 2.4 MS/s were hardware-measured. Other
   rates in the allowed range have rate-planning coverage but need hardware and
   client qualification.

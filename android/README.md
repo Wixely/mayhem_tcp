@@ -30,6 +30,14 @@ top-level console program.
    Start with **2.048 MS/s**. Both AGCs start enabled; clients can override them.
 5. Stop from the app or its persistent notification before disconnecting USB.
 
+**Buffer blocks** sets the output queue capacity (1–1024, default 32) for the
+next server start and is saved with the other settings. Try 64 for brief network
+stalls; larger queues can use more memory and add latency during congestion.
+They cannot compensate for a connection that is consistently too slow.
+Clients can now request 240 kS/s; invalid settings are logged and ignored while
+the previous configuration continues streaming. These changes need testing
+with the updated APK on the physical phone.
+
 No radio is simulated: without a HackRF the app reports that no device was
 found. Only one HackRF and one active TCP client are supported. USB denial,
 unplug and bind failures are shown in the log. Frequency, amplifier, antenna

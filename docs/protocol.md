@@ -16,17 +16,19 @@ command bytes. Commands are processed between USB transfers.
 | Command | Behavior |
 | --- | --- |
 | 0x01 frequency | 1 MHz through 4,294,967,295 Hz; a client's UI may impose narrower limits. |
-| 0x02 sample rate | Output rates 250,000 through 3,200,000 S/s. Hardware is set to a power-of-two multiple at least 8 MS/s and below 16 MS/s. Rates are nominal; clock accuracy is not calibrated. |
-| 0x03 tuner gain mode | 0 enables host-controlled analog AGC; 1 selects manual gain. Other values terminate the session. |
+| 0x02 sample rate | Output rates 240,000 through 3,200,000 S/s. Hardware is set to a power-of-two multiple at least 8 MS/s and below 16 MS/s. At 240 kS/s, capture is 15.36 MS/s with 64× decimation. Rates are nominal; clock accuracy is not calibrated. |
+| 0x03 tuner gain mode | 0 enables host-controlled analog AGC; 1 selects manual gain. Other values are ignored. |
 | 0x04 tuner gain | Signed tenths of a dB, 0 through 1020; mapped to LNA/VGA below. |
 | 0x05 PPM | Signed -1000..1000. Tuning request = nominal frequency / (1 + ppm / 1e6). Does not correct ADC timing. |
-| 0x08 digital AGC | 0 disables, 1 enables software digital IQ AGC independently of analog gain. Other values terminate the session. |
+| 0x08 digital AGC | 0 disables, 1 enables software digital IQ AGC independently of analog gain. Other values are ignored. |
 | 0x0d gain index | Index 0..28 into the R820T gain table. |
 | 0x0e antenna power | 0 disables; 1 enables only with server option `--allow-bias-tee`. Disabled again when the session closes. |
 | Other commands | Ignored and logged, including IF-stage gain, test mode, direct sampling, offset tuning and crystal settings. |
 
-Invalid values for implemented commands terminate the session and are logged
-on the host. Unknown commands do not modify the hardware. AGC/unsupported
+Invalid values for implemented commands are logged and ignored without changing
+the settings or disconnecting. Later valid commands are still processed. USB
+errors, truncated packets and command-queue flooding can still end the session.
+Unknown commands do not modify the hardware. AGC/unsupported
 command messages go to host stderr only. The RF amplifier is always disabled.
 There is no transmit, flash, reboot, register-write or Mayhem UI API exposed.
 
@@ -118,12 +120,21 @@ and brief analog settling effects can still appear around a live gain change.
 There is no sample-accurate transition
 marker in rtl_tcp.
 
-The USB queue uses 16 x 256 KiB transfers; the output queue holds at most 32
+The USB queue uses 16 x 256 KiB transfers; the output queue defaults to 32
 blocks (approximately 2 MiB at decimation 4), plus a writer's current block
 and OS socket buffers. Socket writes have a 2-second timeout. A full queue or
 write failure terminates the stream instead of silently discarding samples.
 USB transfer errors also terminate the session. This does not detect every
 possible loss inside the hardware: raw HackRF samples have no sequence IDs.
+
+The output queue is configurable with `-n BLOCKS` / `--queue-blocks BLOCKS`
+or Android's **Buffer blocks** field, from 1 through 1024. This is a capacity,
+not a target: the server sends each block as soon as possible. Each block is
+approximately 256 KiB divided by the decimation factor. At 2.048 MS/s, 32
+blocks hold about 0.512 seconds of IQ; 64 hold about 1.024 seconds. Larger
+queues increase possible backlog and memory use; they do not fix insufficient
+sustained throughput or override the 2-second socket-write timeout. The USB
+queue remains fixed, and no samples are deliberately dropped to make room.
 
 One client owns the device. Concurrent connections are closed immediately.
 Every later accepted session reopens the device with startup defaults. Ctrl+C

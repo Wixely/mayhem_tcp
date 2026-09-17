@@ -9,6 +9,7 @@ pub struct Config {
     pub allow_bias_tee: bool,
     pub sessions: usize,
     pub service: bool,
+    pub queue_blocks: usize,
 }
 
 impl Config {
@@ -20,6 +21,7 @@ impl Config {
             allow_bias_tee: false,
             sessions: 0,
             service: false,
+            queue_blocks: 32,
         };
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -30,7 +32,8 @@ impl Config {
                         -a ADDRESS       Bind address (default 127.0.0.1)\n\
                         -p PORT          TCP port (default 1234)\n\
                         -f HZ            Initial frequency (default 100000000)\n\
-                        -s HZ            Output rate, 250000..3200000 (default 2048000)\n\
+                        -s HZ            Output rate, 240000..3200000 (default 2048000)\n\
+                        -n BLOCKS        Output queue capacity, 1..1024 (default 32)\n\
                         -g DB            Initial total LNA/VGA gain, 0..102 (default 32)\n\
                         --agc            Start with analog AGC (client may override)\n\
                         --digital-agc    Start with digital IQ AGC (client may override)\n\
@@ -61,6 +64,7 @@ impl Config {
                             config.settings.gain_tenths = (gain * 10.0).round() as i32;
                         }
                         "--serial" => config.serial = Some(value),
+                        "-n" | "--queue-blocks" => config.queue_blocks = value.parse()?,
                         "--sessions" => config.sessions = value.parse()?,
                         _ => return Err(format!("Unknown option {arg}; use --help").into()),
                     }
@@ -68,6 +72,28 @@ impl Config {
             }
         }
         config.settings.validate()?;
+        validate_queue_blocks(config.queue_blocks)?;
         Ok(Some(config))
+    }
+}
+
+pub fn validate_queue_blocks(blocks: usize) -> Result<()> {
+    if !(1..=1024).contains(&blocks) {
+        return Err("Output queue must contain 1..1024 blocks".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn queue_capacity_is_bounded() {
+        for blocks in [1, 32, 1024] {
+            assert!(validate_queue_blocks(blocks).is_ok());
+        }
+        for blocks in [0, 1025, usize::MAX] {
+            assert!(validate_queue_blocks(blocks).is_err());
+        }
     }
 }

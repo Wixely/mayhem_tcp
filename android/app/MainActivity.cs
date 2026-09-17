@@ -17,6 +17,7 @@ public sealed class MainActivity : Activity
 {
     private const string UsbPermission = "com.wixely.mayhemtcp.USB_PERMISSION";
     private EditText port = null!;
+    private EditText queueBlocks = null!;
     private CheckBox lan = null!, analog = null!, digital = null!;
     private TextView status = null!, addresses = null!, logs = null!;
     private ScrollView logScroll = null!;
@@ -25,6 +26,7 @@ public sealed class MainActivity : Activity
     private UsbDevice? pendingDevice;
     private bool pending;
     private ushort pendingPort;
+    private int pendingQueueBlocks;
     private bool pendingLan, pendingAnalog, pendingDigital;
     private System.Threading.Timer? timer;
 
@@ -40,14 +42,24 @@ public sealed class MainActivity : Activity
         var heading = new TextView(this) { Text = "mayhem_tcp", TextSize = 28 };
         root.AddView(heading);
         root.AddView(new TextView(this) { Text = "HackRF → Android → rtl_tcp\nUSB receive server · Android test build", TextSize = 15 });
-        root.AddView(new TextView(this) { Text = "TCP port", TextSize = 16 });
+        var connectionFields = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var portField = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        var queueField = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        portField.AddView(new TextView(this) { Text = "TCP port", TextSize = 16 });
         port = new EditText(this) { Text = "12346", InputType = InputTypes.ClassNumber, ContentDescription = "TCP port" };
-        root.AddView(port);
+        portField.AddView(port);
+        queueField.AddView(new TextView(this) { Text = "Buffer blocks (1–1024)", TextSize = 16 });
+        queueBlocks = new EditText(this) { Text = "32", InputType = InputTypes.ClassNumber, ContentDescription = "Output buffer blocks" };
+        queueField.AddView(queueBlocks);
+        connectionFields.AddView(portField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+        connectionFields.AddView(queueField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+        root.AddView(connectionFields);
         lan = new CheckBox(this) { Text = "Listen on all interfaces (LAN / WireGuard)", Checked = true };
         analog = new CheckBox(this) { Text = "Start with analog AGC", Checked = true };
         digital = new CheckBox(this) { Text = "Start with digital AGC", Checked = true };
         var preferences = GetSharedPreferences("server", FileCreationMode.Private)!;
         port.Text = preferences.GetString("port", "12346");
+        queueBlocks.Text = preferences.GetInt("queueBlocks", 32).ToString();
         lan.Checked = preferences.GetBoolean("lan", true);
         analog.Checked = preferences.GetBoolean("analog", true);
         digital.Checked = preferences.GetBoolean("digital", true);
@@ -129,6 +141,8 @@ public sealed class MainActivity : Activity
         if (ServerState.Active || pending) return;
         if (!ushort.TryParse(port.Text, out pendingPort) || pendingPort == 0)
         { ServerState.Log("Choose a TCP port from 1 to 65535"); return; }
+        if (!int.TryParse(queueBlocks.Text, out pendingQueueBlocks) || pendingQueueBlocks < 1 || pendingQueueBlocks > 1024)
+        { ServerState.Log("Choose an output buffer count from 1 to 1024 (default 32)"); return; }
         var manager = (UsbManager)GetSystemService(UsbService)!;
         var devices = manager.DeviceList!.Values.Where(d => d.VendorId == 0x1d50 && d.ProductId == 0x6089).ToArray();
         if (devices.Length != 1)
@@ -140,6 +154,7 @@ public sealed class MainActivity : Activity
         pendingDevice = devices[0];
         pendingLan = lan.Checked; pendingAnalog = analog.Checked; pendingDigital = digital.Checked;
         GetSharedPreferences("server", FileCreationMode.Private)!.Edit()!
+            .PutInt("queueBlocks", pendingQueueBlocks)!
             .PutString("port", port.Text)!.PutBoolean("lan", pendingLan)!
             .PutBoolean("analog", pendingAnalog)!.PutBoolean("digital", pendingDigital)!.Apply();
         pending = true;
@@ -159,6 +174,7 @@ public sealed class MainActivity : Activity
         pending = false;
         var intent = new Intent(this, typeof(ServerService))
             .PutExtra("device", pendingDevice.DeviceName).PutExtra("port", (int)pendingPort)
+            .PutExtra("queueBlocks", pendingQueueBlocks)
             .PutExtra("lan", pendingLan).PutExtra("analog", pendingAnalog).PutExtra("digital", pendingDigital);
         try { StartForegroundService(intent); }
         catch (Exception error) { ServerState.Log(error.Message); ServerState.Status = "Start failed"; }
@@ -185,7 +201,7 @@ public sealed class MainActivity : Activity
         catch (Exception error) { ServerState.Log($"Native library error: {error.Message}"); }
         SetText(status, pending ? "Waiting for USB permission…" : ServerState.Status);
         start.Enabled = !ServerState.Active && !pending;
-        port.Enabled = lan.Enabled = analog.Enabled = digital.Enabled = !ServerState.Active && !pending;
+        port.Enabled = queueBlocks.Enabled = lan.Enabled = analog.Enabled = digital.Enabled = !ServerState.Active && !pending;
         var logText = ServerState.LogText();
         if (logs.Text != logText)
         {

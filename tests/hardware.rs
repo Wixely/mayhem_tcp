@@ -100,7 +100,7 @@ fn expect_closed(stream: &mut TcpStream) {
             Err(e) => panic!("Expected disconnect, got {e}"),
             Ok(_) => assert!(
                 Instant::now() < deadline,
-                "Server kept streaming after invalid command"
+                "Server kept streaming after stalled reader"
             ),
         }
     }
@@ -115,7 +115,7 @@ fn live_protocol_rates_reconnect_and_backpressure() {
     drop(reservation);
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_mayhem_tcp"))
-            .args(["-p", &port.to_string(), "--sessions", "5"])
+            .args(["-p", &port.to_string(), "--sessions", "5", "-n", "64"])
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()
@@ -131,7 +131,7 @@ fn live_protocol_rates_reconnect_and_backpressure() {
         stream
             .write_all(&[3, 0, 0, 0, 1, 8, 0, 0, 0, 0, 13, 0, 0, 0, 20, 9, 0, 0, 0, 0])
             .unwrap();
-        for rate in [2_000_000, 2_048_000, 2_400_000, 250_000] {
+        for rate in [2_000_000, 2_048_000, 2_400_000, 250_000, 240_000] {
             measure(&mut stream, rate);
         }
         command(&mut stream, 1, 101_000_000);
@@ -144,8 +144,14 @@ fn live_protocol_rates_reconnect_and_backpressure() {
     {
         let mut stream = connect(port);
         command(&mut stream, 2, 0);
-        expect_closed(&mut stream);
-        println!("Invalid rate disconnected correctly");
+        command(&mut stream, 3, 2);
+        command(&mut stream, 8, 2);
+        // Rejected commands must leave the initial rate and connection intact.
+        receive(&mut stream, 0.6);
+        let (bytes, seconds, _) = receive(&mut stream, 3.0);
+        assert!((bytes as f64 / seconds / 2.0 / 2_048_000.0 - 1.0).abs() < 0.03);
+        measure(&mut stream, 240_000);
+        println!("Invalid commands ignored; later valid rate accepted");
     }
     {
         let mut stream = connect(port);

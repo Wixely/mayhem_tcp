@@ -61,7 +61,7 @@ also worked after disabling WireGuard on the phone; see the Android instructions
 for the tested connection modes.
 
 - One receive client at a time. No transmission or firmware-writing features.
-- Output rates **250 kS/s through 3.2 MS/s**; USB capture uses a power-of-two
+- Output rates **240 kS/s through 3.2 MS/s**; USB capture uses a power-of-two
   multiple at least 8 MS/s, followed by a real low-pass decimator.
 - Tuning, analog AGC, manual gain/gain index and tuning-only PPM correction are implemented.
 - Analog AGC adjusts LNA/VGA from raw IQ levels. Enable it in the client or
@@ -78,8 +78,12 @@ for the tested connection modes.
 - Gain and auto/manual changes run live without restarting RX or the filter.
   Gain transitions still have hardware settling effects. Switching back to
   manual restores the last requested manual gain.
-- Stalled readers/invalid implemented settings terminate the session; a later
-  client can reconnect. Unknown RTL-specific commands are ignored and logged.
+- Invalid settings are ignored and logged, preserving the previous settings
+  and connection. Unknown RTL-specific commands are also ignored and logged.
+- Set `-n BLOCKS` / `--queue-blocks BLOCKS` to adjust the output queue (1–1024,
+  default 32). Larger queues absorb longer network stalls but can add latency
+  and memory use. A full queue or stalled writer still disconnects the client;
+  a later client can reconnect.
 - Only the hardware/rates/clients in the [validation record](docs/validation.md)
   have been tested. No GUI client, calibrated RF signal, or long-term lossless
   capture claim is made. No authentication/encryption is added to rtl_tcp.

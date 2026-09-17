@@ -13,7 +13,7 @@ pub struct Decimator {
 
 impl Decimator {
     pub fn new(divisor: usize) -> Self {
-        assert!(divisor.is_power_of_two() && divisor <= 32);
+        assert!(divisor.is_power_of_two() && divisor <= 64);
         let length = 64 * divisor + 1;
         let cutoff = 0.4 / divisor as f64;
         let mut taps: Vec<f32> = (0..length)
@@ -110,7 +110,7 @@ mod tests {
     }
     #[test]
     fn passband_and_alias_rejection() {
-        for divisor in [4, 8, 32] {
+        for divisor in [4, 8, 32, 64] {
             let mut output = vec![];
             Decimator::new(divisor).process(&tone(0.2 / divisor as f64, 32_768), &mut output);
             let pass = rms(&output[512..]);
@@ -123,6 +123,22 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn low_rate_decimation_preserves_fragmented_stream() {
+        let input = tone(0.2 / 64.0, 40_003);
+        let mut whole = vec![];
+        Decimator::new(64).process(&input, &mut whole);
+        let mut filter = Decimator::new(64);
+        let mut fragmented = vec![];
+        let mut block = vec![];
+        for chunk in input.chunks(126) {
+            filter.process(chunk, &mut block);
+            fragmented.extend_from_slice(&block);
+        }
+        assert_eq!(whole, fragmented);
+        assert_eq!(whole.len(), (40_003 / 64) * 2);
+    }
+
     #[test]
     fn digital_agc_preserves_chunking_and_amplifies_before_quantization() {
         use crate::digital_agc::DigitalAgc;

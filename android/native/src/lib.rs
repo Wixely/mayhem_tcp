@@ -38,12 +38,14 @@ pub unsafe extern "C" fn mt_create(
     lan: u8,
     analog: u8,
     digital: u8,
+    queue_blocks: u32,
 ) -> *mut ServerHandle {
     mayhem_tcp::diagnostics::set_sink(log);
     let result = catch_unwind(|| -> mayhem_tcp::Result<_> {
         if fd < 0 || port == 0 {
             return Err("Invalid USB descriptor or TCP port".into());
         }
+        mayhem_tcp::config::validate_queue_blocks(queue_blocks as usize)?;
         // Duplicate rather than taking ownership of Android's descriptor.
         let fd = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned()?;
         let address = if lan != 0 {
@@ -64,6 +66,7 @@ pub unsafe extern "C" fn mt_create(
                 allow_bias_tee: false,
                 sessions: 0,
                 service: false,
+                queue_blocks: queue_blocks as usize,
             },
             stop: Arc::new(AtomicBool::new(false)),
         }))
@@ -170,7 +173,7 @@ mod tests {
 
     #[test]
     fn invalid_descriptor_is_rejected_and_reported() {
-        assert!(unsafe { mt_create(-1, 12346, 1, 1, 1) }.is_null());
+        assert!(unsafe { mt_create(-1, 12346, 1, 1, 1, 32) }.is_null());
         let mut buffer = [0_u8; 8192];
         let mut messages = String::new();
         loop {
@@ -186,8 +189,10 @@ mod tests {
     #[test]
     fn descriptor_is_duplicated_and_stop_before_run_is_safe() {
         let file = File::open("/dev/null").unwrap();
-        let handle = unsafe { mt_create(file.as_raw_fd(), 12346, 1, 1, 1) };
+        assert!(unsafe { mt_create(file.as_raw_fd(), 12346, 1, 1, 1, 0) }.is_null());
+        let handle = unsafe { mt_create(file.as_raw_fd(), 12346, 1, 1, 1, 64) };
         assert!(!handle.is_null());
+        assert_eq!(unsafe { &*handle }.config.queue_blocks, 64);
         drop(file);
         // The descriptor survives closure of the caller's original handle.
         let owned = unsafe { &*handle }.fd.lock().unwrap();
@@ -204,7 +209,7 @@ mod tests {
     #[test]
     fn invalid_usb_descriptor_fails_without_unwinding_across_ffi() {
         let file = File::open("/dev/null").unwrap();
-        let handle = unsafe { mt_create(file.as_raw_fd(), 12346, 0, 0, 0) };
+        let handle = unsafe { mt_create(file.as_raw_fd(), 12346, 0, 0, 0, 32) };
         assert!(!handle.is_null());
         unsafe {
             assert_eq!(mt_run(handle), -1);

@@ -64,7 +64,8 @@ public sealed class ServerService : Service
             {
                 handle = Native.Create(connection.FileDescriptor, checked((ushort)port), (byte)(lan ? 1 : 0),
                     (byte)((intent?.GetBooleanExtra("analog", true) ?? true) ? 1 : 0),
-                    (byte)((intent?.GetBooleanExtra("digital", true) ?? true) ? 1 : 0));
+                    (byte)((intent?.GetBooleanExtra("digital", true) ?? true) ? 1 : 0),
+                    checked((uint)(intent?.GetIntExtra("queueBlocks", 32) ?? 32)));
                 if (handle == 0) throw new InvalidOperationException("Could not create native server; see log");
             }
             var power = (PowerManager)GetSystemService(PowerService)!;

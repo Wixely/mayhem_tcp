@@ -57,8 +57,8 @@ impl Settings {
         if self.frequency < 1_000_000 {
             return Err("Frequency must be 1 MHz..4294967295 Hz".into());
         }
-        if !(250_000..=3_200_000).contains(&self.rate) {
-            return Err("Output rate must be 250000..3200000 Hz".into());
+        if !(240_000..=3_200_000).contains(&self.rate) {
+            return Err("Output rate must be 240000..3200000 Hz".into());
         }
         if !(0..=1020).contains(&self.gain_tenths) {
             return Err("Gain must be 0..102 dB".into());
@@ -219,6 +219,7 @@ mod tests {
         let mut settings = Settings::default();
         for (id, value) in [
             (2, 0),
+            (2, 239_999),
             (2, u32::MAX),
             (1, 0),
             (13, 29),
@@ -237,7 +238,8 @@ mod tests {
     #[test]
     fn rates_and_gains_stay_in_hardware_ranges() {
         for rate in [
-            250_000, 1_024_000, 1_536_000, 2_000_000, 2_048_000, 2_400_000, 3_200_000,
+            240_000, 249_999, 250_000, 1_024_000, 1_536_000, 2_000_000, 2_048_000, 2_400_000,
+            3_200_000,
         ] {
             let settings = Settings {
                 rate,
