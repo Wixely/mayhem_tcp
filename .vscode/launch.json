@@ -1,7 +1,28 @@
 {
   "version": "0.2.0",
   "configurations": [
-    {"name": "mayhem_tcp (localhost)", "type": "cppvsdbg", "request": "launch", "program": "${workspaceFolder}/target/debug/mayhem_tcp.exe", "args": [], "cwd": "${workspaceFolder}", "preLaunchTask": "Build mayhem_tcp"},
+    {
+      "name": "mayhem_tcp (localhost, both AGCs)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/mayhem_tcp.exe",
+      "args": ["-a", "127.0.0.1", "-p", "12346", "--agc", "--digital-agc"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "environment": [{"name": "RUST_BACKTRACE", "value": "1"}],
+      "preLaunchTask": "Build mayhem_tcp"
+    },
+    {
+      "name": "mayhem_tcp (localhost, manual gain)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/mayhem_tcp.exe",
+      "args": ["-a", "127.0.0.1", "-p", "12346", "-g", "32"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "environment": [{"name": "RUST_BACKTRACE", "value": "1"}],
+      "preLaunchTask": "Build mayhem_tcp"
+    },
     {"name": "USB probe (information only)", "type": "cppvsdbg", "request": "launch", "program": "${workspaceFolder}/tools/usb-probe/target/debug/mayhem-usb-probe.exe", "args": [], "cwd": "${workspaceFolder}", "preLaunchTask": "Build USB probe"}
   ]
 }

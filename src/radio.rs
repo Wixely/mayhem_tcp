@@ -1,4 +1,8 @@
-use crate::{Result, protocol::Settings};
+use crate::{
+    Result,
+    agc::{Gains, USB_TRANSFER_BYTES, USB_TRANSFERS},
+    protocol::Settings,
+};
 use nusb::{
     Device, Interface, MaybeFuture,
     transfer::{Bulk, ControlIn, ControlOut, ControlType, In, Recipient},
@@ -91,15 +95,22 @@ impl Radio {
         let mut data = ((frequency / 1_000_000) as u32).to_le_bytes().to_vec();
         data.extend_from_slice(&((frequency % 1_000_000) as u32).to_le_bytes());
         self.set(16, 0, 0, &data)?;
-        let (lna, vga) = settings.gains();
+        let Gains { lna, vga } = settings.initial_gains();
         for (request, gain) in [(19, lna), (20, vga)] {
             if self.get(request, gain, 1)? != [1] {
                 return Err("HackRF rejected gain".into());
             }
         }
         eprintln!(
-            "Configured frequency={} Hz output={} S/s USB={} S/s decimation={} LNA={} VGA={} bias={}",
-            settings.frequency, settings.rate, rate, divisor, lna, vga, settings.bias_tee
+            "Configured frequency={} Hz output={} S/s USB={} S/s decimation={} LNA={} VGA={} bias={} auto_gain={}",
+            settings.frequency,
+            settings.rate,
+            rate,
+            divisor,
+            lna,
+            vga,
+            settings.bias_tee,
+            settings.auto_gain
         );
         Ok(())
     }
@@ -107,12 +118,20 @@ impl Radio {
         Ok(self
             .interface
             .endpoint::<Bulk, In>(0x81)?
-            .reader(256 * 1024)
-            .with_num_transfers(16)
+            .reader(USB_TRANSFER_BYTES)
+            .with_num_transfers(USB_TRANSFERS)
             .with_read_timeout(Duration::from_millis(500)))
     }
     pub fn start(&self) -> Result<()> {
         self.set(1, 1, 0, &[])
+    }
+    pub fn set_gains_live(&self, previous: Gains, gains: Gains) -> Result<()> {
+        for (request, gain) in gains.writes_from(previous) {
+            if self.get(request, gain, 1)? != [1] {
+                return Err("HackRF rejected live gain update".into());
+            }
+        }
+        Ok(())
     }
     pub fn stop(&self) -> Result<()> {
         self.set(1, 0, 0, &[])

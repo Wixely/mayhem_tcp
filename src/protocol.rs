@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{Result, agc::Gains};
 
 // R820T compatibility profile: gain values in tenths of a dB, as used by
 // librtlsdr clients. These values select an approximate HackRF total gain.
@@ -34,6 +34,8 @@ pub struct Settings {
     pub frequency: u32,
     pub rate: u32,
     pub gain_tenths: i32,
+    pub auto_gain: bool,
+    pub digital_agc: bool,
     pub ppm: i32,
     pub bias_tee: bool,
 }
@@ -43,6 +45,8 @@ impl Default for Settings {
             frequency: 100_000_000,
             rate: 2_048_000,
             gain_tenths: 320,
+            auto_gain: false,
+            digital_agc: false,
             ppm: 0,
             bias_tee: false,
         }
@@ -87,12 +91,39 @@ impl Settings {
         (lna, total - lna)
     }
 
+    pub fn initial_gains(&self) -> Gains {
+        let (lna, vga) = self.gains();
+        if self.auto_gain {
+            Gains::balanced(lna + vga)
+        } else {
+            Gains { lna, vga }
+        }
+    }
+
+    pub fn requires_restart(&self, previous: &Self) -> bool {
+        self.frequency != previous.frequency
+            || self.rate != previous.rate
+            || self.ppm != previous.ppm
+            || self.bias_tee != previous.bias_tee
+    }
+
     pub fn command(&mut self, command: Command, allow_bias: bool) -> Result<Option<&'static str>> {
         let mut next = self.clone();
         match command.id {
             0x01 => next.frequency = command.value,
             0x02 => next.rate = command.value,
-            0x03 | 0x08 => return Ok(Some("AGC is not emulated; manual gain remains active")),
+            0x03 => {
+                if command.value > 1 {
+                    return Err("Tuner gain mode must be 0 (auto) or 1 (manual)".into());
+                }
+                next.auto_gain = command.value == 0;
+            }
+            0x08 => {
+                if command.value > 1 {
+                    return Err("Digital AGC must be 0 (off) or 1 (on)".into());
+                }
+                next.digital_agc = command.value == 1;
+            }
             0x04 => next.gain_tenths = command.value as i32,
             0x05 => next.ppm = command.value as i32,
             0x0d => {
@@ -123,6 +154,54 @@ impl Settings {
 mod tests {
     use super::*;
     #[test]
+    fn automatic_mode_preserves_manual_gain_and_digital_is_independent() {
+        let mut settings = Settings::default();
+        let previous = settings.clone();
+        settings
+            .command(Command { id: 3, value: 0 }, false)
+            .unwrap();
+        assert!(settings.auto_gain);
+        assert_eq!(settings.initial_gains(), Gains { lna: 16, vga: 16 });
+        assert!(!settings.requires_restart(&previous));
+        settings
+            .command(Command { id: 8, value: 1 }, false)
+            .unwrap();
+        assert!(settings.auto_gain);
+        assert!(settings.digital_agc);
+        assert!(!settings.requires_restart(&previous));
+        settings
+            .command(Command { id: 4, value: 460 }, false)
+            .unwrap();
+        assert!(settings.auto_gain);
+        settings
+            .command(Command { id: 3, value: 1 }, false)
+            .unwrap();
+        assert_eq!(settings.initial_gains(), Gains { lna: 40, vga: 6 });
+        assert!(!settings.auto_gain);
+        assert!(settings.digital_agc);
+        settings
+            .command(Command { id: 8, value: 0 }, false)
+            .unwrap();
+        assert!(!settings.digital_agc);
+        let previous = settings.clone();
+        assert!(
+            settings
+                .command(Command { id: 3, value: 2 }, false)
+                .is_err()
+        );
+        assert_eq!(settings, previous);
+        settings
+            .command(
+                Command {
+                    id: 1,
+                    value: 101_000_000,
+                },
+                false,
+            )
+            .unwrap();
+        assert!(settings.requires_restart(&previous));
+    }
+    #[test]
     fn wire_profile_and_signed_correction() {
         assert_eq!(greeting(), *b"RTL0\0\0\0\x05\0\0\0\x1d");
         let mut settings = Settings::default();
@@ -145,6 +224,7 @@ mod tests {
             (13, 29),
             (4, u32::MAX),
             (5, 1001),
+            (8, 2),
         ] {
             assert!(settings.command(Command { id, value }, false).is_err());
             assert_eq!(settings, Settings::default());

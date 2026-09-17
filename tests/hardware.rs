@@ -3,9 +3,12 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     process::{Child, Command, Stdio},
+    sync::Mutex,
     thread,
     time::{Duration, Instant},
 };
+
+static HARDWARE_LOCK: Mutex<()> = Mutex::new(());
 
 struct Server(Child);
 impl Drop for Server {
@@ -106,6 +109,7 @@ fn expect_closed(stream: &mut TcpStream) {
 #[test]
 #[ignore = "Requires an exclusively available HackRF; performs RX at 100/101 MHz"]
 fn live_protocol_rates_reconnect_and_backpressure() {
+    let _exclusive = HARDWARE_LOCK.lock().unwrap();
     let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
@@ -162,4 +166,74 @@ fn live_protocol_rates_reconnect_and_backpressure() {
         assert!(Instant::now() < deadline, "Server failed to exit cleanly");
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+#[ignore = "Requires an exclusively available HackRF; exercises live analog gain at 100/101 MHz"]
+fn live_agc_and_manual_restore_without_gain_restarts() {
+    let _exclusive = HARDWARE_LOCK.lock().unwrap();
+    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = reservation.local_addr().unwrap().port();
+    drop(reservation);
+    let mut server = Server(
+        Command::new(env!("CARGO_BIN_EXE_mayhem_tcp"))
+            .args(["-p", &port.to_string(), "--sessions", "1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stderr = server.0.stderr.take().unwrap();
+    let logger = thread::spawn(move || {
+        let mut log = String::new();
+        stderr.read_to_string(&mut log).unwrap();
+        log
+    });
+    {
+        let mut stream = connect(port);
+        command(&mut stream, 8, 1);
+        command(&mut stream, 3, 0);
+        measure(&mut stream, 2_048_000);
+        // Remember a manual gain while automatic control continues.
+        command(&mut stream, 4, 460);
+        receive(&mut stream, 0.5);
+        command(&mut stream, 3, 1);
+        receive(&mut stream, 0.5);
+        command(&mut stream, 8, 0);
+        receive(&mut stream, 0.5);
+        command(&mut stream, 4, 240);
+        receive(&mut stream, 0.5);
+        command(&mut stream, 3, 0);
+        command(&mut stream, 8, 1);
+        receive(&mut stream, 0.5);
+        command(&mut stream, 1, 101_000_000);
+        measure(&mut stream, 2_048_000);
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = server.0.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        assert!(Instant::now() < deadline, "Server failed to stop");
+        thread::sleep(Duration::from_millis(50));
+    }
+    let log = logger.join().unwrap();
+    println!("{log}");
+    assert_eq!(
+        log.matches("Configured frequency=").count(),
+        2,
+        "Only start and retune may restart RX"
+    );
+    assert!(log.contains("Live gain mode=auto"));
+    assert_eq!(log.matches("Digital AGC=true").count(), 3);
+    assert_eq!(log.matches("Digital AGC=false").count(), 2);
+    assert!(
+        log.contains("Live gain mode=manual LNA=40 VGA=6"),
+        "Manual setting was not restored"
+    );
+    assert!(log.contains("Live gain mode=manual LNA=24 VGA=0"));
+    assert!(!log.contains("Session ended:"), "Unexpected stream error");
+    // Actual AGC adjustments depend on the ambient RF level: synthetic tests
+    // assert the controller's responses, while this checks live control and RX.
 }

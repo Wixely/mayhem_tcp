@@ -42,6 +42,16 @@ impl Decimator {
     }
 
     pub fn process(&mut self, input: &[u8], output: &mut Vec<u8>) {
+        self.process_with(input, output, |sample| sample);
+    }
+
+    // Transform filtered floating-point IQ before the final 8-bit quantization.
+    pub fn process_with(
+        &mut self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        mut transform: impl FnMut([f32; 2]) -> [f32; 2],
+    ) {
         assert_eq!(input.len() % 2, 0);
         output.clear();
         let length = self.taps.len();
@@ -69,7 +79,7 @@ impl Decimator {
                 result[0] += tap * (window[i][0] + window[length - 1 - i][0]);
                 result[1] += tap * (window[i][1] + window[length - 1 - i][1]);
             }
-            for value in result {
+            for value in transform(result) {
                 output.push((value.round().clamp(-128.0, 127.0) as i16 + 128) as u8);
             }
         }
@@ -113,6 +123,33 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn digital_agc_preserves_chunking_and_amplifies_before_quantization() {
+        use crate::digital_agc::DigitalAgc;
+        let input = tone(0.03, 10003);
+        let mut whole = vec![];
+        let mut agc = DigitalAgc::new(250_000);
+        Decimator::new(4).process_with(&input, &mut whole, |iq| agc.process(iq));
+        let mut filter = Decimator::new(4);
+        let mut agc = DigitalAgc::new(250_000);
+        let mut fragmented = vec![];
+        let mut block = vec![];
+        for chunk in input.chunks(126) {
+            filter.process_with(chunk, &mut block, |iq| agc.process(iq));
+            fragmented.extend_from_slice(&block);
+        }
+        assert_eq!(whole, fragmented);
+        // Sparse one-count impulses become fractional samples in the filter.
+        let mut sparse = vec![0; 8192];
+        sparse[4096] = 1;
+        let mut plain = vec![];
+        let mut boosted = vec![];
+        Decimator::new(4).process(&sparse, &mut plain);
+        Decimator::new(4).process_with(&sparse, &mut boosted, |iq| [iq[0] * 64.0, iq[1] * 64.0]);
+        assert!(plain.iter().all(|&b| b == 128));
+        assert!(boosted.iter().any(|&b| b != 128));
+    }
+
     #[test]
     fn chunk_boundaries_preserve_phase_and_iq() {
         let input = tone(0.03, 10003);

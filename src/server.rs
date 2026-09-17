@@ -1,5 +1,6 @@
 use crate::{
     Result,
+    agc::{Controller, USB_TRANSFER_BYTES},
     config::Config,
     dsp::Decimator,
     protocol::{self, Command},
@@ -186,15 +187,19 @@ fn capture(
     global: &AtomicBool,
 ) -> Result<()> {
     let mut settings = config.settings.clone();
-    let mut input = vec![0_u8; 256 * 1024];
+    let mut input = vec![0_u8; USB_TRANSFER_BYTES];
     let started = Instant::now();
     let mut input_bytes = 0_u64;
     let mut output_bytes = 0_u64;
     while !stopped(local, global) {
         radio.configure(&settings)?;
         let current_generation = generation.fetch_add(1, Ordering::AcqRel) + 1;
-        let (_, divisor) = settings.hardware_rate();
+        let (hardware_rate, divisor) = settings.hardware_rate();
+        let mut gains = settings.initial_gains();
+        let mut agc = Controller::new(hardware_rate, gains);
         let mut filter = Decimator::new(divisor);
+        let mut digital = crate::digital_agc::DigitalAgc::new(settings.rate);
+        eprintln!("Digital AGC={}", settings.digital_agc);
         let mut reader = radio.reader()?;
         radio.start()?;
         // Discard the first transfer after each restart to allow RF settling.
@@ -207,8 +212,26 @@ fn capture(
                     eprintln!("Command 0x{:02x}: {warning}", command.id);
                 }
             }
-            if previous != settings {
+            if settings.requires_restart(&previous) {
                 break;
+            }
+            if settings.digital_agc != previous.digital_agc {
+                digital = crate::digital_agc::DigitalAgc::new(settings.rate);
+                eprintln!("Digital AGC={}", settings.digital_agc);
+            }
+            if settings.auto_gain != previous.auto_gain
+                || (!settings.auto_gain && settings.gain_tenths != previous.gain_tenths)
+            {
+                let desired = settings.initial_gains();
+                radio.set_gains_live(gains, desired)?;
+                gains = desired;
+                agc = Controller::new(hardware_rate, gains);
+                eprintln!(
+                    "Live gain mode={} LNA={} VGA={}",
+                    if settings.auto_gain { "auto" } else { "manual" },
+                    gains.lna,
+                    gains.vga
+                );
             }
             let count = reader.read(&mut input)?;
             if count == 0 || count % 2 != 0 {
@@ -219,8 +242,22 @@ fn capture(
                 settling = false;
                 continue;
             }
+            if settings.auto_gain {
+                if let Some(adjustment) = agc.observe(&input[..count]) {
+                    radio.set_gains_live(gains, adjustment.gains)?;
+                    gains = adjustment.gains;
+                    eprintln!(
+                        "AGC {}: rms={:.2} peak={} LNA={} VGA={}",
+                        adjustment.reason, adjustment.rms, adjustment.peak, gains.lna, gains.vga
+                    );
+                }
+            }
             let mut output = Vec::with_capacity(count / divisor + 2);
-            filter.process(&input[..count], &mut output);
+            if settings.digital_agc {
+                filter.process_with(&input[..count], &mut output, |iq| digital.process(iq));
+            } else {
+                filter.process(&input[..count], &mut output);
+            }
             output_bytes += output.len() as u64;
             data.try_send(Block {
                 generation: current_generation,

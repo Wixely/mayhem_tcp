@@ -32,6 +32,8 @@ impl Config {
                         -f HZ            Initial frequency (default 100000000)\n\
                         -s HZ            Output rate, 250000..3200000 (default 2048000)\n\
                         -g DB            Initial total LNA/VGA gain, 0..102 (default 32)\n\
+                        --agc            Start with analog AGC (client may override)\n\
+                        --digital-agc    Start with digital IQ AGC (client may override)\n\
                         --serial SERIAL  Select one HackRF by its USB serial\n\
                         --allow-bias-tee  Allow client antenna-power commands (default blocked)\n\
                         --sessions N     Exit after N sessions (default unlimited)\n\
@@ -41,6 +43,8 @@ impl Config {
                     return Ok(None);
                 }
                 "--allow-bias-tee" => config.allow_bias_tee = true,
+                "--agc" => config.settings.auto_gain = true,
+                "--digital-agc" => config.settings.digital_agc = true,
                 "--service" => config.service = true,
                 _ => {
                     let value = args.next().ok_or("Missing option value; use --help")?;
