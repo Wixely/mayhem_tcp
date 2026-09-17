@@ -56,8 +56,9 @@ cargo build --release --locked
 An experimental Android 16 USB-host app is available on the Android development
 branch. See [Android build and test instructions](android/README.md) for the
 ARM64 test APK, foreground service and WireGuard setup. A short physical-device
-stream over WireGuard has been verified at 2.048 MS/s; direct phone-LAN access
-did not work in that test setup and remains unresolved.
+stream over WireGuard has been verified at 2.048 MS/s. Direct phone-LAN access
+also worked after disabling WireGuard on the phone; see the Android instructions
+for the tested connection modes.
 
 - One receive client at a time. No transmission or firmware-writing features.
 - Output rates **250 kS/s through 3.2 MS/s**; USB capture uses a power-of-two

@@ -19,6 +19,7 @@ public sealed class MainActivity : Activity
     private EditText port = null!;
     private CheckBox lan = null!, analog = null!, digital = null!;
     private TextView status = null!, addresses = null!, logs = null!;
+    private ScrollView logScroll = null!;
     private Button start = null!;
     private PermissionReceiver? permissionReceiver;
     private UsbDevice? pendingDevice;
@@ -34,6 +35,8 @@ public sealed class MainActivity : Activity
         var root = new LinearLayout(this) { Orientation = Orientation.Vertical };
         var density = Resources!.DisplayMetrics!.Density;
         root.SetPadding((int)(20 * density), (int)(36 * density), (int)(20 * density), (int)(24 * density));
+        if (OperatingSystem.IsAndroidVersionAtLeast(30))
+            root.SetOnApplyWindowInsetsListener(new ContentInsets(density));
         var heading = new TextView(this) { Text = "mayhem_tcp", TextSize = 28 };
         root.AddView(heading);
         root.AddView(new TextView(this) { Text = "HackRF → Android → rtl_tcp\nUSB receive server · Android test build", TextSize = 15 });
@@ -63,21 +66,62 @@ public sealed class MainActivity : Activity
         buttons.AddView(start, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         buttons.AddView(stop, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         root.AddView(buttons);
+        var helpButtons = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var battery = new Button(this) { Text = "Battery settings" };
+        var about = new Button(this) { Text = "About" };
+        battery.Click += (_, _) => new AlertDialog.Builder(this)
+            .SetTitle("Background streaming")!
+            .SetMessage("In Android's battery optimization settings, select All apps if needed, find mayhem_tcp, and choose Don't optimize or Unrestricted. Labels vary by phone. This may help background streaming and increases battery use; it does not guarantee uninterrupted operation.")!
+            .SetPositiveButton("Open settings", (_, _) => OpenBatterySettings())!
+            .SetNegativeButton("Cancel", (_, _) => { })!.Show();
+        about.Click += (_, _) => new AlertDialog.Builder(this)
+            .SetTitle("About mayhem_tcp")!
+            .SetMessage("A receive-only HackRF USB server for existing rtl_tcp clients.\n\nExperimental Android build.\n\nSource, documentation and issue reports:\nhttps://github.com/Wixely/mayhem_tcp")!
+            .SetPositiveButton("Open GitHub", (_, _) => OpenExternal(new Intent(Intent.ActionView,
+                global::Android.Net.Uri.Parse("https://github.com/Wixely/mayhem_tcp"))))!
+            .SetNegativeButton("Close", (_, _) => { })!.Show();
+        helpButtons.AddView(battery, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+        helpButtons.AddView(about, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+        root.AddView(helpButtons);
         status = new TextView(this) { TextSize = 17 };
         addresses = new TextView(this) { TextSize = 13 };
         root.AddView(status); root.AddView(addresses);
         root.AddView(new TextView(this) { Text = "Connect using RTL-TCP and the phone's reachable IP. Over WireGuard use its tunnel IP. HackRF must be in HackRF mode. Client commands can override AGC.", TextSize = 13 });
-        var scroll = new ScrollView(this);
+        logScroll = new ScrollView(this);
         logs = new TextView(this) { TextSize = 12 };
         logs.SetTextIsSelectable(true);
-        scroll.AddView(logs);
-        root.AddView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, 0, 1));
+        logScroll.AddView(logs);
+        root.AddView(logScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, 0, 1));
         SetContentView(root);
+        root.RequestApplyInsets();
         permissionReceiver = new PermissionReceiver(this);
         if (OperatingSystem.IsAndroidVersionAtLeast(33)) RegisterReceiver(permissionReceiver, new IntentFilter(UsbPermission), ReceiverFlags.NotExported);
         else RegisterReceiver(permissionReceiver, new IntentFilter(UsbPermission));
         if (OperatingSystem.IsAndroidVersionAtLeast(33) && CheckSelfPermission(Manifest.Permission.PostNotifications) != Permission.Granted)
             RequestPermissions([Manifest.Permission.PostNotifications], 2);
+    }
+
+    private void OpenBatterySettings()
+    {
+        try { StartActivity(new Intent(global::Android.Provider.Settings.ActionIgnoreBatteryOptimizationSettings)); }
+        catch (ActivityNotFoundException)
+        {
+            OpenExternal(new Intent(global::Android.Provider.Settings.ActionApplicationDetailsSettings,
+                global::Android.Net.Uri.Parse($"package:{PackageName}")));
+        }
+        catch (Exception error) { ServerState.Log($"Could not open battery settings: {error.Message}"); }
+    }
+
+    private void OpenExternal(Intent intent)
+    {
+        try { StartActivity(intent); }
+        catch (Exception error)
+        {
+            new AlertDialog.Builder(this).SetTitle("Could not open")!
+                .SetMessage("Open Android Settings or visit https://github.com/Wixely/mayhem_tcp manually.")!
+                .SetPositiveButton("OK", (_, _) => { })!.Show();
+            ServerState.Log($"Could not open external activity: {error.Message}");
+        }
     }
 
     private void RequestStart()
@@ -142,7 +186,19 @@ public sealed class MainActivity : Activity
         SetText(status, pending ? "Waiting for USB permission…" : ServerState.Status);
         start.Enabled = !ServerState.Active && !pending;
         port.Enabled = lan.Enabled = analog.Enabled = digital.Enabled = !ServerState.Active && !pending;
-        SetText(logs, ServerState.LogText());
+        var logText = ServerState.LogText();
+        if (logs.Text != logText)
+        {
+            // Check the old content before layout grows; leave readers who scrolled up alone.
+            var follow = !logScroll.CanScrollVertically(1);
+            logs.Text = logText;
+            if (follow)
+                logScroll.Post(() =>
+                {
+                    if (!IsDestroyed && !IsFinishing)
+                        logScroll.ScrollTo(0, Math.Max(0, logs.Bottom - logScroll.Height));
+                });
+        }
         try
         {
             var entries = NetworkInterface.GetAllNetworkInterfaces()
@@ -157,6 +213,22 @@ public sealed class MainActivity : Activity
     private static void SetText(TextView view, string text)
     {
         if (view.Text != text) view.Text = text;
+    }
+
+    private sealed class ContentInsets(float density) : Java.Lang.Object, View.IOnApplyWindowInsetsListener
+    {
+        public WindowInsets OnApplyWindowInsets(View? view, WindowInsets? insets)
+        {
+            if (view != null && insets != null && OperatingSystem.IsAndroidVersionAtLeast(30))
+            {
+                var safe = insets.GetInsets(WindowInsets.Type.SystemBars() | WindowInsets.Type.DisplayCutout() | WindowInsets.Type.Ime());
+                // Always calculate from fixed spacing, so repeated dispatches cannot accumulate padding.
+                view.SetPadding((int)(20 * density) + safe.Left,
+                    Math.Max((int)(36 * density), safe.Top + (int)(12 * density)),
+                    (int)(20 * density) + safe.Right, (int)(24 * density) + safe.Bottom);
+            }
+            return insets!;
+        }
     }
 
     private sealed class PermissionReceiver(MainActivity owner) : BroadcastReceiver

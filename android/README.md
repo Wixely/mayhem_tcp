@@ -38,12 +38,28 @@ There is no transmit or firmware-writing feature.
 
 ## WireGuard / mobile data
 
+For background streaming, tap **Battery settings** for instructions and a shortcut
+to Android's battery optimization list. Select mayhem_tcp (choose All apps if
+needed), then Don't optimize or Unrestricted; wording varies by phone. If that
+settings page is unavailable, the shortcut opens app details instead. Settings
+are changed only by the user. This can increase battery use and is not a verified
+fix for background interruptions. **About** shows the project repository and an
+**Open GitHub** button for source, documentation and issue reports.
+
 Wi-Fi is not required. The app uses ordinary sockets and does not bind to a
 specific Android network or bypass the VPN. Start WireGuard and include this
 app if the tunnel uses per-app filtering. The home client connects to the
 phone's tunnel IP. WireGuard AllowedIPs, home routing/firewall and peer-to-peer
 forwarding must permit that connection. Changing between Wi-Fi and cellular
 can break an existing TCP session; reconnect the client afterward.
+
+On the tested Android 16 phone, use the phone's **WireGuard IP while WireGuard
+is enabled**, or its **LAN IP with WireGuard disabled**. Direct LAN access failed
+with the tunnel enabled and worked after the user turned WireGuard off, with
+no app change. Keep **Listen on all interfaces (LAN / WireGuard)** selected and
+use port **12346**. This points to VPN routing or policy; the exact setting
+responsible was not identified. Simultaneous direct LAN and WireGuard access
+has not been verified.
 
 At 2.048 MS/s the IQ payload is 32.768 Mbit/s, about 14.75 GB/hour, before
 TCP/VPN overhead. USB receives 16.384 MB/s at that setting. CPU/thermal limits,
@@ -112,10 +128,12 @@ measuring 2,047,965 complex samples/s at the requested 2.048 MS/s. The user
 also confirmed their client worked. This verifies short USB-to-VPN streaming,
 not calibrated RF performance or sustained operation.
 
-The phone's LAN address responded to ping but TCP port 12346 timed out; only
-the WireGuard address worked in that setup. The cause is not established, so
-do not claim direct LAN connectivity has been qualified. No private addresses
-are included in this record. Screen-off behavior, notification Stop, unplug,
+Direct LAN access initially failed while WireGuard was enabled. After the user
+disabled WireGuard on the phone, a TCP connection to the LAN address on port
+12346 succeeded, returned the RTL0 greeting and delivered 7,300 bytes of IQ.
+This verifies a short LAN connection and data reception, not sustained LAN
+throughput. No private addresses are included in this record.
+Screen-off behavior, notification Stop, unplug,
 long-duration throughput and network handover remain unverified on hardware.
 
 Android owns `UsbDeviceConnection`; Rust duplicates its descriptor before
@@ -130,8 +148,8 @@ server worker; the screen need not stay on.
 **User next action:** test retuning, AGC toggles, screen-off streaming, client reconnect, USB
 unplug and notification Stop. Share the in-app log and phone model if a step
 fails. **Codex next action:** fix findings and measure throughput/thermal
-behavior before a stable Android release; investigate direct LAN access if
-needed. Short ARM64 hardware/VPN streaming is verified as described above.
+behavior before a stable Android release. Short ARM64 hardware/VPN streaming
+and LAN reception with WireGuard disabled are verified as described above.
 
 ## GitHub Android builds
 
