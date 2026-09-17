@@ -7,6 +7,8 @@ internal static class Native
 {
     [DllImport("mayhem_android", EntryPoint = "mt_create")]
     internal static extern nint Create(int fd, ushort port, byte lan, byte analog, byte digital, uint queueBlocks);
+    [DllImport("mayhem_android", EntryPoint = "mt_configure")]
+    internal static extern int Configure(nint handle, ref StartupOptions options);
     [DllImport("mayhem_android", EntryPoint = "mt_run")]
     internal static extern int Run(nint handle);
     [DllImport("mayhem_android", EntryPoint = "mt_stop")]

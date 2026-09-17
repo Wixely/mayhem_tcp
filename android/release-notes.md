@@ -1,20 +1,17 @@
-Experimental Android 16 / ARM64 USB-host server for HackRF and PortaPack Mayhem.
-The USB/TCP/DSP/AGC engine is Rust; the Android UI and foreground service use .NET.
+﻿mayhem_tcp v0.2.0 brings the Android USB-host app and expanded Osmocom rtl_tcp compatibility to main. Downloads include Windows x64 and Android ARM64, SHA-256 checksums and dependency licenses.
 
-Install the ARM64 APK, connect a HackRF in HackRF mode, tap Start server and
-grant USB access. Both AGCs and all-interface binding default on; port is 12346.
-Choose RTL-TCP in the client and use the phone's WireGuard IP while the tunnel
-is enabled, or its LAN IP with WireGuard disabled.
+- Android 16 USB hosting with a Rust engine and .NET foreground service, configurable buffers, battery-settings shortcut and Radio settings.
+- Automatic device light/dark appearance and the red circuit-crab launcher icon.
+- Output rates from 225001 S/s to 3.2 MS/s, offset tuning, tuning/sample-clock PPM correction and a hardware-paced software test counter.
+- Independent analog/digital AGC, gain-index support, USB buffer/device selection options and explicit antenna-power opt-in.
+- Invalid settings preserve streaming; bounded queues and session cleanup support reconnection.
 
-Short physical-device streaming over WireGuard was verified at 2.048 MS/s.
-Direct phone-LAN access also returned the RTL0 greeting and IQ data after
-disabling WireGuard on the phone. LAN access with WireGuard enabled failed in
-that setup; the specific VPN routing or policy cause remains unidentified.
-Screen-off, unplug, notification Stop and sustained throughput need more testing.
+Windows: extract the ZIP and run `mayhem_tcp.exe --agc --digital-agc -p 12346`. Select RTL-TCP in your client. Use `-a 0.0.0.0` for remote connections.
 
-This self-contained APK needs no separate .NET installation. It is signed with
-a temporary CI debug key, so Android may require uninstalling a previous test
-APK signed with a different key before installation. Uninstalling removes saved
-settings. This is not a production-signed or Play Store release.
+Android: install the ARM64 APK, connect the HackRF in HackRF mode and start the server. With WireGuard enabled, use the phone's tunnel IP; direct LAN worked in our setup with WireGuard off. The APK is self-contained and needs no .NET installation.
 
-SHA-256 checksums and dependency/runtime license notices are attached.
+The GitHub APK uses a temporary CI debug signing key. Updating a locally signed or older CI test APK may require uninstalling it first, which removes saved settings. Production signing is not configured.
+
+Validation includes 24 offline Rust tests, four Android-native emulator tests, physical phone rate/mode/reconnection tests, a short locked-screen run, an 8-USB-buffer maximum-rate run and relative RF offset-tuning checks. Light/dark switching and field restoration were checked in the Android 16 emulator. CI runs offline checks and builds; it has no HackRF.
+
+Receive-only experimental prerelease. RTL-specific IF gain, direct sampling and crystal commands are documented no-ops on HackRF. Calibrated clock accuracy, extended Android reliability, broad GUI-client compatibility and service/deployment modes remain unverified or deferred. Windows executable is unsigned. See docs/validation.md and docs/osmocom-parity.md for the precise scope.

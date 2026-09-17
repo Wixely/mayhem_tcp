@@ -16,14 +16,16 @@ command bytes. Commands are processed between USB transfers.
 | Command | Behavior |
 | --- | --- |
 | 0x01 frequency | 1 MHz through 4,294,967,295 Hz; a client's UI may impose narrower limits. |
-| 0x02 sample rate | Output rates 240,000 through 3,200,000 S/s. Hardware is set to a power-of-two multiple at least 8 MS/s and below 16 MS/s. At 240 kS/s, capture is 15.36 MS/s with 64× decimation. Rates are nominal; clock accuracy is not calibrated. |
+| 0x02 sample rate | Output rates 225,001 through 3,200,000 S/s. Nominal hardware rate is a power-of-two multiple at least 8 MS/s and below 16 MS/s, adjusted for PPM. At 240 kS/s, capture is nominally 15.36 MS/s with 64× decimation. Clock accuracy is not calibrated. |
 | 0x03 tuner gain mode | 0 enables host-controlled analog AGC; 1 selects manual gain. Other values are ignored. |
 | 0x04 tuner gain | Signed tenths of a dB, 0 through 1020; mapped to LNA/VGA below. |
-| 0x05 PPM | Signed -1000..1000. Tuning request = nominal frequency / (1 + ppm / 1e6). Does not correct ADC timing. |
+| 0x05 PPM | Signed -1000..1000. Tuning and sample-clock requests are divided by (1 + ppm / 1e6). Assumes a shared reference error. |
+| 0x07 test mode | 0 disables, 1 enables a software byte counter after DSP. USB reception paces it; it cannot detect losses inside the radio. |
 | 0x08 digital AGC | 0 disables, 1 enables software digital IQ AGC independently of analog gain. Other values are ignored. |
 | 0x0d gain index | Index 0..28 into the R820T gain table. |
+| 0x0a offset tuning | 0 disables, 1 enables off-centre capture plus digital recentering. Restarts RX. |
 | 0x0e antenna power | 0 disables; 1 enables only with server option `--allow-bias-tee`. Disabled again when the session closes. |
-| Other commands | Ignored and logged, including IF-stage gain, test mode, direct sampling, offset tuning and crystal settings. |
+| Other commands | Ignored and logged, including RTL IF-stage gain, direct sampling and crystal settings, which have no faithful HackRF mapping. |
 
 Invalid values for implemented commands are logged and ignored without changing
 the settings or disconnecting. Later valid commands are still processed. USB
@@ -102,6 +104,24 @@ for measurements requiring fixed amplitude or when automatic behavior is unsuita
 
 ## Streaming and transitions
 
+Offset tuning uses a nominal hardware LO at requested frequency + Fs/4. A
+four-phase complex rotation shifts the captured wanted band up by Fs/4 before
+the existing anti-alias filter. The hardware DC spike is moved out of that band.
+The analog filter is widened to cover the displaced wanted band. Oscillator
+phase persists across USB blocks and resets when RX is reconfigured.
+
+PPM adjusts both the hardware LO and sample clock. Zero PPM retains the original
+integer sample-rate request. Nonzero PPM uses HackRF's fractional-rate USB
+request with denominator 16 and rounded numerator (1/16 Hz request resolution).
+Firmware clock synthesis adds its own quantization. No calibrated clock accuracy
+claim follows from the arithmetic tests.
+
+Test mode replaces filtered output with an incrementing unsigned byte counter
+from 0 through 255, preserving continuity across output blocks. Enabling it or
+restarting RX resets the counter; AGC does not scale it. It requires a receiving
+HackRF and checks the downstream stream only. Disabling returns to ordinary IQ
+without restarting RX. Already queued bytes can precede either mode change.
+
 The decimator uses a unity-DC-gain Blackman-windowed sinc filter with
 `64 * divisor + 1` taps and cutoff at 0.4 times output sample rate. Its transition
 occupies the spectrum near output Nyquist; the whole displayed bandwidth is
@@ -109,7 +129,7 @@ not a flat passband. It evaluates symmetric taps only at retained samples.
 State and decimation phase persist between USB blocks. Filtered values are
 rounded/clipped into signed 8-bit range, then biased to unsigned bytes.
 
-Frequency, sample rate, PPM or antenna-power changes stop RX, retire its USB
+Frequency, sample rate, PPM, offset tuning or antenna-power changes stop RX, retire its USB
 queue, reconfigure, and reset DSP/AGC history. Automatic mode reseeds from the
 remembered manual total on restart. The first new USB transfer is discarded for settling.
 Queued output from previous configurations is skipped, but bytes already
@@ -120,7 +140,7 @@ and brief analog settling effects can still appear around a live gain change.
 There is no sample-accurate transition
 marker in rtl_tcp.
 
-The USB queue uses 16 x 256 KiB transfers; the output queue defaults to 32
+The USB queue defaults to 16 x 256 KiB transfers; the output queue defaults to 32
 blocks (approximately 2 MiB at decimation 4), plus a writer's current block
 and OS socket buffers. Socket writes have a 2-second timeout. A full queue or
 write failure terminates the stream instead of silently discarding samples.
@@ -134,7 +154,9 @@ approximately 256 KiB divided by the decimation factor. At 2.048 MS/s, 32
 blocks hold about 0.512 seconds of IQ; 64 hold about 1.024 seconds. Larger
 queues increase possible backlog and memory use; they do not fix insufficient
 sustained throughput or override the 2-second socket-write timeout. The USB
-queue remains fixed, and no samples are deliberately dropped to make room.
+queue can be configured separately with `-b` / `--usb-buffers` (1–64; 0 selects
+the default 16) or Android Radio settings. AGC settling accounts for the selected
+USB depth. No samples are deliberately dropped to make room.
 
 One client owns the device. Concurrent connections are closed immediately.
 Every later accepted session reopens the device with startup defaults. Ctrl+C

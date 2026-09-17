@@ -6,6 +6,14 @@ USB API 0x0111, WinUSB driver. No firmware/driver changes were made.
 
 ## Offline checks
 
+Android theme update (2026-09-17): ARM64/x64 APK builds passed with zero warnings
+or errors, and the artifact scan passed. On the Android 16 x64 emulator, inspected
+the light and dark main screens, dark Radio dialog and light About dialog.
+Switching system night mode light → dark → light preserved an unsaved main-screen
+buffer-count edit and AGC checkbox state. Native resource variants select the
+theme; no AndroidX dependency or manual appearance setting was added. A live
+HackRF stream during a theme switch still needs physical-phone verification.
+
 - Release tests: **13 passed** after the analog AGC addition. Cover wire greeting, signed correction,
   invalid-setting rejection without mutation, rate/gain bounds, fragmented and
   coalesced commands including intervening read timeouts, command flooding and
@@ -134,6 +142,57 @@ reconnect, invalid-command and stalled-reader regression checks.
 
 ### Remaining verification
 
+The subsequent Osmocom parity update is covered separately in
+[the parity matrix](osmocom-parity.md). Its 24 offline tests, four Android-native
+emulator tests, desktop/Android Clippy and ARM64/x64 APK builds pass. New Radio
+dialog rendering, save/reopen behavior and antenna-power opt-in validation were
+checked on the Android 16 emulator. Offset recentering/DC rejection, test-counter
+continuity, PPM clock arithmetic and USB-depth-aware AGC settling have synthetic
+coverage. These new hardware paths are not qualified by the older streaming
+measurements below. Remaining Android reliability tests are deferred at the
+user's request.
+
+On 2026-09-17 the updated APK passed a physical-phone LAN parity test. For
+225001/240000/2048000/3200000 S/s requests, baseline measurements were
+224841/240248/2047415/3199099 S/s, and offset-enabled measurements were
+224963/239778/2047840/3198409 S/s (about three seconds each). PPM settings
++20/-20/+1000/-1000/0 all sustained reception at requested 2.048 MS/s; these
+short host-timed measurements are not oscillator calibration. Test mode delivered
+40,958,704 consecutive bytes over ten seconds without a counter discontinuity.
+Invalid test/offset mode, PPM and rate settings left the counter running. Turning
+test mode off restored ordinary IQ; reconnecting worked. Antenna power was
+explicitly disabled. Calibrated clock accuracy remains unverified.
+
+A subsequent LAN run on 2026-09-17 passed with the user confirming readiness
+after instructions to select 8 USB buffers and retain 64 output queue blocks.
+The USB count is a host startup setting and cannot be read back over rtl_tcp;
+the phone configuration was not independently inspected through ADB.
+Normal reception at 225001/240000/2048000/3200000 S/s measured
+224796/239596/2049110/3198777 S/s; offset-enabled reception measured
+224757/239850/2046813/3198050 S/s. All were within the test's 3% tolerance.
+PPM +20/-20/+1000/-1000/0 transitions, invalid-command handling, return from
+test mode to normal IQ and reconnecting passed. The software test counter
+delivered 40,960,000 consecutive bytes over ten seconds without discontinuity;
+this does not establish lossless hardware sampling before counter generation.
+Six ten-second ordinary-IQ windows at 3.2 MS/s, with both AGCs enabled, measured
+3,198,509–3,201,088 S/s without disconnecting. Antenna power was explicitly off,
+and the test client disconnected afterward. This qualifies the reported
+8-buffer configuration for this short run; other non-default USB depths and
+long-duration behavior remain untested.
+
+An ambient-spectrum test near the user-reported TETRA band used fixed 40 dB
+manual gain, both AGCs off, zero PPM, 2.048 MS/s and antenna power off. Each
+capture averaged 512 Hann-windowed 4096-point FFTs (500 Hz bins) after two seconds
+of draining. At 391 MHz centre, normal/offset/normal centre-bin levels were
+-32.0/-91.8/-32.1 dBFS; at 391.25 MHz, they were -32.0/-86.8/-31.8 dBFS.
+A peak stayed near absolute 391.0305–391.031 MHz across both capture centres
+and modes, supporting physical recentering and centre-spike suppression of
+approximately 55–60 dB in this setup. No output rail clipping was observed.
+Signal strengths varied between sequential captures. Carrier identity, exact
+frequency and modulation were not established or decoded; no calibrated PPM
+or RF-amplitude accuracy claim follows. Only averaged spectra were saved locally,
+not raw IQ. The final request was 391.25 MHz, offset off, followed by disconnect.
+
 Compatibility update reviewed on 2026-09-17: all 19 offline tests pass, including
 64× decimation passband/alias rejection and fragmented-stream equivalence for
 240 kS/s, queue-capacity bounds, and invalid-setting rejection without mutation.
@@ -141,10 +200,39 @@ Desktop and Android native Clippy and formatting checks passed. The ARM64 APK
 built without warnings/errors and passed the artifact scan. CLI help and rejection
 of a zero queue capacity were checked. The live regression suite now checks 240
 kS/s, a 64-block queue, and continued streaming after invalid commands; it has
-not been rerun against hardware for this update. Android buffer persistence and
-the updated native-call arguments need a physical-device run with this APK.
+not been rerun against desktop hardware for this update.
 
-- Only 250 kS/s, 2 MS/s, 2.048 MS/s and 2.4 MS/s were hardware-measured. Other
+The updated ARM64 APK subsequently passed a remote LAN test on the physical
+Android phone with the user-confirmed default 32-block queue. Measured rates
+were 239,955 / 249,930 / 2,002,325 / 2,047,363 / 2,400,857 / 3,198,829 samples/s
+for requests of 240/250 kS/s and 2/2.048/2.4/3.2 MS/s, each measured for about
+four seconds after draining startup data. Gain/AGC toggles, 100/101 MHz tuning,
+fragmented/coalesced commands, three reconnects, invalid rate/gain-mode/digital
+AGC/gain-index commands followed by valid 240 kS/s, stalled-reader cleanup,
+and concurrent-client rejection all passed. Six consecutive ten-second windows
+at 2.048 MS/s measured 2,047,559–2,048,819 samples/s without a disconnect.
+This verifies the updated native-call path at 32 blocks.
+
+A repeat on 2026-09-17 with the user reporting 64 buffer blocks and the app
+in the background passed the same full remote suite. Rate-sweep measurements
+were 240,039 / 250,009 / 2,002,028 / 2,047,647 / 2,399,295 / 3,199,254 samples/s.
+Six consecutive ten-second windows at 2.048 MS/s measured 2,047,935–2,049,532
+samples/s without a disconnect. Three reconnects, invalid-command recovery,
+stalled-reader cleanup and concurrent-client rejection passed. The client was
+disconnected afterward. Screen state and battery policy were not recorded;
+that run alone does not establish screen-off reliability.
+
+The following user-coordinated lock-screen run on 2026-09-17 passed eighteen
+ten-second measurements at 2.048 MS/s (2,046,464–2,049,567 samples/s). The same
+64-block server remained connected for over three minutes, including short
+drain intervals between measurements. After disconnecting, a fresh client
+received the RTL0 header and streamed for five seconds at 2,048,291 samples/s.
+The test client then disconnected normally. Lock state was not independently
+queried via ADB. This qualifies a short user-coordinated locked-screen session;
+Doze, overnight reliability, battery policy and preference persistence remain
+unverified.
+
+- Across desktop and Android, 240/250 kS/s and 2/2.048/2.4/3.2 MS/s were hardware-measured. Other
   rates in the allowed range have rate-planning coverage but need hardware and
   client qualification.
 - No SDR#/SDR++ GUI session, known-signal RF comparison, long-duration loss

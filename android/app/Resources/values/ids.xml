@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Stable IDs let Android restore edits when a system theme change recreates the activity. -->
+  <item name="port" type="id" />
+  <item name="queue_blocks" type="id" />
+  <item name="listen_lan" type="id" />
+  <item name="analog_agc" type="id" />
+  <item name="digital_agc" type="id" />
+</resources>

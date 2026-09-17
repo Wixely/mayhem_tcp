@@ -9,10 +9,16 @@ pub struct Decimator {
     taps: Vec<f32>,
     history: Vec<[f32; 2]>,
     cursor: usize,
+    quarter_shift: bool,
+    oscillator_phase: usize,
 }
 
 impl Decimator {
     pub fn new(divisor: usize) -> Self {
+        Self::with_offset(divisor, false)
+    }
+
+    pub fn with_offset(divisor: usize, quarter_shift: bool) -> Self {
         assert!(divisor.is_power_of_two() && divisor <= 64);
         let length = 64 * divisor + 1;
         let cutoff = 0.4 / divisor as f64;
@@ -38,6 +44,8 @@ impl Decimator {
             history: vec![[0.0; 2]; length * 2],
             taps,
             cursor: 0,
+            quarter_shift,
+            oscillator_phase: 0,
         }
     }
 
@@ -56,7 +64,19 @@ impl Decimator {
         output.clear();
         let length = self.taps.len();
         for pair in input.chunks_exact(2) {
-            let sample = [pair[0] as i8 as f32, pair[1] as i8 as f32];
+            let [i, q] = [pair[0] as i8 as f32, pair[1] as i8 as f32];
+            let sample = if self.quarter_shift {
+                let rotated = match self.oscillator_phase {
+                    0 => [i, q],
+                    1 => [-q, i],
+                    2 => [-i, -q],
+                    _ => [q, -i],
+                };
+                self.oscillator_phase = (self.oscillator_phase + 1) % 4;
+                rotated
+            } else {
+                [i, q]
+            };
             self.history[self.cursor] = sample;
             self.history[self.cursor + length] = sample;
             self.cursor += 1;
@@ -123,6 +143,36 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn offset_recenters_wanted_band_and_rejects_hardware_dc() {
+        for divisor in [4, 8, 32, 64] {
+            let base = tone(0.2 / divisor as f64, 32_768);
+            let shifted = tone(-0.25 + 0.2 / divisor as f64, 32_768);
+            let mut expected = vec![];
+            Decimator::new(divisor).process(&base, &mut expected);
+            let mut filter = Decimator::with_offset(divisor, true);
+            let mut actual = vec![];
+            let mut block = vec![];
+            for chunk in shifted.chunks(126) {
+                filter.process(chunk, &mut block);
+                actual.extend_from_slice(&block);
+            }
+            assert_eq!(actual.len(), expected.len());
+            assert!(
+                actual
+                    .iter()
+                    .zip(&expected)
+                    .all(|(a, b)| (*a as i16 - *b as i16).abs() <= 1)
+            );
+            let mut dc = vec![];
+            Decimator::with_offset(divisor, true).process(&[40_u8, 20].repeat(32_768), &mut dc);
+            assert!(
+                rms(&dc[512..]) < 0.5,
+                "hardware DC not rejected for {divisor}"
+            );
+        }
+    }
+
     #[test]
     fn low_rate_decimation_preserves_fragmented_stream() {
         let input = tone(0.2 / 64.0, 40_003);

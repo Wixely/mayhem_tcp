@@ -24,7 +24,10 @@ fn stopped(local: &AtomicBool, global: &AtomicBool) -> bool {
 
 pub fn run(config: Config, shutdown: Arc<AtomicBool>) -> Result<()> {
     let serial = config.serial.clone();
-    run_with_radio(config, shutdown, move || Radio::open(serial.as_deref()))
+    let index = config.device_index;
+    run_with_radio(config, shutdown, move || {
+        Radio::open_selected(serial.as_deref(), index)
+    })
 }
 
 pub fn run_with_radio(
@@ -33,6 +36,8 @@ pub fn run_with_radio(
     open_radio: impl Fn() -> Result<Radio> + Clone + Send + 'static,
 ) -> Result<()> {
     crate::config::validate_queue_blocks(config.queue_blocks)?;
+    crate::config::validate_usb_buffers(config.usb_buffers)?;
+    config.settings.validate()?;
     let listener = TcpListener::bind(config.listen)?;
     listener.set_nonblocking(true)?;
     crate::diagnostic!(
@@ -215,11 +220,17 @@ fn capture(
         let current_generation = generation.fetch_add(1, Ordering::AcqRel) + 1;
         let (hardware_rate, divisor) = settings.hardware_rate();
         let mut gains = settings.initial_gains();
-        let mut agc = Controller::new(hardware_rate, gains);
-        let mut filter = Decimator::new(divisor);
+        let mut agc = Controller::with_usb_transfers(hardware_rate, gains, config.usb_buffers);
+        let mut filter = Decimator::with_offset(divisor, settings.offset_tuning);
+        let mut pattern = TestPattern::default();
         let mut digital = crate::digital_agc::DigitalAgc::new(settings.rate);
         crate::diagnostic!("Digital AGC={}", settings.digital_agc);
-        let mut reader = radio.reader()?;
+        let mut reader = radio.reader(config.usb_buffers)?;
+        crate::diagnostic!(
+            "USB buffers={} test_mode={}",
+            config.usb_buffers,
+            settings.test_mode
+        );
         radio.start()?;
         // Discard the first transfer after each restart to allow RF settling.
         let mut settling = true;
@@ -240,6 +251,10 @@ fn capture(
             if settings.requires_restart(&previous) {
                 break;
             }
+            if settings.test_mode != previous.test_mode {
+                pattern = TestPattern::default();
+                crate::diagnostic!("Test mode={}", settings.test_mode);
+            }
             if settings.digital_agc != previous.digital_agc {
                 digital = crate::digital_agc::DigitalAgc::new(settings.rate);
                 crate::diagnostic!("Digital AGC={}", settings.digital_agc);
@@ -250,7 +265,7 @@ fn capture(
                 let desired = settings.initial_gains();
                 radio.set_gains_live(gains, desired)?;
                 gains = desired;
-                agc = Controller::new(hardware_rate, gains);
+                agc = Controller::with_usb_transfers(hardware_rate, gains, config.usb_buffers);
                 crate::diagnostic!(
                     "Live gain mode={} LNA={} VGA={}",
                     if settings.auto_gain { "auto" } else { "manual" },
@@ -288,6 +303,9 @@ fn capture(
                 filter.process(&input[..count], &mut output);
             }
             output_bytes += output.len() as u64;
+            if settings.test_mode {
+                pattern.fill(&mut output);
+            }
             data.try_send(Block {
                 generation: current_generation,
                 bytes: output,
@@ -307,9 +325,32 @@ fn capture(
     Ok(())
 }
 
+// Hardware-paced counter after DSP: checks network continuity, not losses inside USB/RF.
+#[derive(Default)]
+struct TestPattern(u8);
+impl TestPattern {
+    fn fill(&mut self, output: &mut [u8]) {
+        for byte in output {
+            *byte = self.0;
+            self.0 = self.0.wrapping_add(1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_counter_wraps_and_preserves_continuity_between_blocks() {
+        let mut counter = TestPattern::default();
+        let mut first = [0; 511];
+        let mut second = [0; 513];
+        counter.fill(&mut first);
+        counter.fill(&mut second);
+        for (index, byte) in first.into_iter().chain(second).enumerate() {
+            assert_eq!(byte, index as u8);
+        }
+    }
     struct Fragmented {
         bytes: Vec<u8>,
         index: usize,

@@ -1,6 +1,6 @@
 use crate::{
     Result,
-    agc::{Gains, USB_TRANSFER_BYTES, USB_TRANSFERS},
+    agc::{Gains, USB_TRANSFER_BYTES},
     protocol::Settings,
 };
 use nusb::{
@@ -21,6 +21,16 @@ impl Radio {
 
     #[cfg(not(target_os = "android"))]
     pub fn open(serial: Option<&str>) -> Result<Self> {
+        Self::open_selected(serial, None)
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn open_selected(_serial: Option<&str>, _index: Option<usize>) -> Result<Self> {
+        Self::open(None)
+    }
+
+    #[cfg(not(target_os = "android"))]
+    pub fn open_selected(serial: Option<&str>, index: Option<usize>) -> Result<Self> {
         let devices: Vec<_> = nusb::list_devices()
             .wait()?
             .filter(|d| {
@@ -29,14 +39,18 @@ impl Radio {
                     && serial.is_none_or(|s| d.serial_number() == Some(s))
             })
             .collect();
-        if devices.len() != 1 {
+        if index.is_none() && devices.len() != 1 {
             return Err(format!(
                 "Expected one available HackRF One, found {}; select HackRF mode or use --serial",
                 devices.len()
             )
             .into());
         }
-        let device = devices[0].open().wait()?;
+        let device = devices
+            .get(index.unwrap_or(0))
+            .ok_or("HackRF device index out of range")?
+            .open()
+            .wait()?;
         Self::from_device(device)
     }
 
@@ -95,17 +109,20 @@ impl Radio {
         self.set(17, 0, 0, &[])?; // RF amplifier off.
         self.set(23, settings.bias_tee as u16, 0, &[])?;
         let (rate, divisor) = settings.hardware_rate();
-        let mut data = rate.to_le_bytes().to_vec();
-        data.extend_from_slice(&1_u32.to_le_bytes());
+        let (numerator, denominator) = settings.sample_clock();
+        let mut data = numerator.to_le_bytes().to_vec();
+        data.extend_from_slice(&denominator.to_le_bytes());
         self.set(6, 0, 0, &data)?;
         // Choose the next supported analog bandwidth at/above output rate;
         // digital anti-alias filtering is done before decimation.
-        let bandwidth = [1_750_000_u32, 2_500_000, 3_500_000]
-            .into_iter()
-            .find(|&b| b >= settings.rate)
-            .unwrap();
+        let bandwidth = settings.analog_bandwidth();
         self.set(7, bandwidth as u16, (bandwidth >> 16) as u16, &[])?;
         let frequency = settings.corrected_frequency();
+        crate::diagnostic!(
+            "Hardware tuning={frequency} Hz clock={numerator}/{denominator} Hz offset={} ppm={}",
+            settings.offset_tuning,
+            settings.ppm
+        );
         let mut data = ((frequency / 1_000_000) as u32).to_le_bytes().to_vec();
         data.extend_from_slice(&((frequency % 1_000_000) as u32).to_le_bytes());
         self.set(16, 0, 0, &data)?;
@@ -128,12 +145,12 @@ impl Radio {
         );
         Ok(())
     }
-    pub fn reader(&self) -> Result<impl Read + use<>> {
+    pub fn reader(&self, transfers: usize) -> Result<impl Read + use<>> {
         Ok(self
             .interface
             .endpoint::<Bulk, In>(0x81)?
             .reader(USB_TRANSFER_BYTES)
-            .with_num_transfers(USB_TRANSFERS)
+            .with_num_transfers(transfers)
             .with_read_timeout(Duration::from_millis(500)))
     }
     pub fn start(&self) -> Result<()> {

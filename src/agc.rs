@@ -75,9 +75,13 @@ pub struct Controller {
     cooldown: u64,
     hang: u64,
     low: u64,
+    usb_transfers: usize,
 }
 impl Controller {
     pub fn new(rate: u32, gains: Gains) -> Self {
+        Self::with_usb_transfers(rate, gains, USB_TRANSFERS)
+    }
+    pub fn with_usb_transfers(rate: u32, gains: Gains, usb_transfers: usize) -> Self {
         let mut agc = Self {
             rate: rate as u64,
             gains,
@@ -85,13 +89,14 @@ impl Controller {
             cooldown: 0,
             hang: 0,
             low: 0,
+            usb_transfers,
         };
         agc.cooldown = agc.settling_samples();
         agc
     }
     fn settling_samples(&self) -> u64 {
         // Old-gain IQ can still fill the USB queue after a live control write.
-        (USB_TRANSFER_BYTES * USB_TRANSFERS / 2) as u64 + self.rate / 50
+        (USB_TRANSFER_BYTES * self.usb_transfers / 2) as u64 + self.rate / 50
     }
     pub fn observe(&mut self, raw: &[u8]) -> Option<Adjustment> {
         assert_eq!(raw.len() % 2, 0);
@@ -173,6 +178,14 @@ mod tests {
             remaining -= n;
         }
         actions
+    }
+    #[test]
+    fn larger_usb_queue_defers_agc_until_old_samples_are_drained() {
+        let mut small = Controller::with_usb_transfers(RATE, Gains::balanced(48), 1);
+        let mut large = Controller::with_usb_transfers(RATE, Gains::balanced(48), 64);
+        let samples = USB_TRANSFER_BYTES / 2 + RATE as usize / 25 + 4096;
+        assert!(!feed(&mut small, 127, samples).is_empty());
+        assert!(feed(&mut large, 127, samples).is_empty());
     }
     #[test]
     fn fast_attack_slow_recovery_and_settling() {

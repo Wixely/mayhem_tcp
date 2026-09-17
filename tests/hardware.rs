@@ -115,7 +115,16 @@ fn live_protocol_rates_reconnect_and_backpressure() {
     drop(reservation);
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_mayhem_tcp"))
-            .args(["-p", &port.to_string(), "--sessions", "5", "-n", "64"])
+            .args([
+                "-p",
+                &port.to_string(),
+                "--sessions",
+                "5",
+                "-n",
+                "64",
+                "-b",
+                "8",
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()
@@ -131,9 +140,23 @@ fn live_protocol_rates_reconnect_and_backpressure() {
         stream
             .write_all(&[3, 0, 0, 0, 1, 8, 0, 0, 0, 0, 13, 0, 0, 0, 20, 9, 0, 0, 0, 0])
             .unwrap();
-        for rate in [2_000_000, 2_048_000, 2_400_000, 250_000, 240_000] {
+        for rate in [2_000_000, 2_048_000, 2_400_000, 250_000, 240_000, 225_001] {
             measure(&mut stream, rate);
         }
+        command(&mut stream, 10, 1);
+        command(&mut stream, 5, 20);
+        measure(&mut stream, 2_048_000);
+        command(&mut stream, 5, (-20_i32) as u32);
+        measure(&mut stream, 240_000);
+        command(&mut stream, 5, 0);
+        command(&mut stream, 10, 0);
+        command(&mut stream, 7, 1);
+        receive(&mut stream, 0.8);
+        let mut counter = [0; 65536];
+        stream.read_exact(&mut counter).unwrap();
+        assert!(counter.windows(2).all(|p| p[1] == p[0].wrapping_add(1)));
+        command(&mut stream, 7, 0);
+        measure(&mut stream, 2_048_000);
         command(&mut stream, 1, 101_000_000);
         receive(&mut stream, 0.3);
     }

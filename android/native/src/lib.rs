@@ -29,6 +29,63 @@ pub struct ServerHandle {
     stop: Arc<AtomicBool>,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StartupOptions {
+    frequency: u32,
+    rate: u32,
+    gain_tenths: i32,
+    ppm: i32,
+    usb_buffers: u32,
+    flags: u32, // offset=1, test=2, allow antenna power=4, initial antenna power=8
+}
+
+/// # Safety
+/// Both pointers must be valid. Call only before mt_run, with exclusive handle access.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mt_configure(
+    handle: *mut ServerHandle,
+    options: *const StartupOptions,
+) -> i32 {
+    if handle.is_null() || options.is_null() {
+        return -1;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| -> mayhem_tcp::Result<()> {
+        let options = unsafe { *options };
+        let handle = unsafe { &mut *handle };
+        mayhem_tcp::config::validate_usb_buffers(options.usb_buffers as usize)?;
+        if options.flags & !15 != 0 || (options.flags & 8 != 0 && options.flags & 4 == 0) {
+            return Err("Invalid startup flags or antenna power without opt-in".into());
+        }
+        let settings = Settings {
+            frequency: options.frequency,
+            rate: options.rate,
+            gain_tenths: options.gain_tenths,
+            ppm: options.ppm,
+            offset_tuning: options.flags & 1 != 0,
+            test_mode: options.flags & 2 != 0,
+            bias_tee: options.flags & 8 != 0,
+            ..handle.config.settings.clone()
+        };
+        settings.validate()?;
+        handle.config.settings = settings;
+        handle.config.usb_buffers = options.usb_buffers as usize;
+        handle.config.allow_bias_tee = options.flags & 4 != 0;
+        Ok(())
+    }));
+    match result {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) => {
+            log(&format!("Startup settings rejected: {error}"));
+            -1
+        }
+        Err(_) => {
+            log("Startup configuration panicked");
+            -2
+        }
+    }
+}
+
 /// # Safety
 /// fd must be a valid, open Android USB descriptor for the duration of this call.
 #[unsafe(no_mangle)]
@@ -67,6 +124,8 @@ pub unsafe extern "C" fn mt_create(
                 sessions: 0,
                 service: false,
                 queue_blocks: queue_blocks as usize,
+                usb_buffers: mayhem_tcp::agc::USB_TRANSFERS,
+                device_index: None,
             },
             stop: Arc::new(AtomicBool::new(false)),
         }))
@@ -171,6 +230,37 @@ mod tests {
     use super::*;
     use std::{fs::File, os::fd::AsRawFd};
 
+    #[test]
+    fn startup_options_validate_before_mutation() {
+        assert_eq!(std::mem::size_of::<StartupOptions>(), 24);
+        let file = File::open("/dev/null").unwrap();
+        let handle = unsafe { mt_create(file.as_raw_fd(), 12346, 1, 1, 1, 32) };
+        assert!(!handle.is_null());
+        let mut options = StartupOptions {
+            frequency: 101_000_000,
+            rate: 225_001,
+            gain_tenths: 240,
+            ppm: -20,
+            usb_buffers: 8,
+            flags: 3,
+        };
+        unsafe {
+            assert_eq!(mt_configure(handle, &options), 0);
+            assert_eq!((*handle).config.usb_buffers, 8);
+            let saved = (*handle).config.settings.clone();
+            assert!(saved.offset_tuning && saved.test_mode && !saved.bias_tee);
+            options.flags = 8;
+            assert_eq!(mt_configure(handle, &options), -1);
+            assert_eq!((*handle).config.settings, saved);
+            options.flags = 12;
+            assert_eq!(mt_configure(handle, &options), 0);
+            assert!((*handle).config.settings.bias_tee && (*handle).config.allow_bias_tee);
+            options.usb_buffers = 0;
+            assert_eq!(mt_configure(handle, &options), -1);
+            assert_eq!((*handle).config.usb_buffers, 8);
+            mt_free(handle);
+        }
+    }
     #[test]
     fn invalid_descriptor_is_rejected_and_reported() {
         assert!(unsafe { mt_create(-1, 12346, 1, 1, 1, 32) }.is_null());

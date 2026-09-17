@@ -21,7 +21,7 @@ public sealed class MainActivity : Activity
     private CheckBox lan = null!, analog = null!, digital = null!;
     private TextView status = null!, addresses = null!, logs = null!;
     private ScrollView logScroll = null!;
-    private Button start = null!;
+    private Button start = null!, advanced = null!;
     private PermissionReceiver? permissionReceiver;
     private UsbDevice? pendingDevice;
     private bool pending;
@@ -46,17 +46,17 @@ public sealed class MainActivity : Activity
         var portField = new LinearLayout(this) { Orientation = Orientation.Vertical };
         var queueField = new LinearLayout(this) { Orientation = Orientation.Vertical };
         portField.AddView(new TextView(this) { Text = "TCP port", TextSize = 16 });
-        port = new EditText(this) { Text = "12346", InputType = InputTypes.ClassNumber, ContentDescription = "TCP port" };
+        port = new EditText(this) { Id = Resource.Id.port, Text = "12346", InputType = InputTypes.ClassNumber, ContentDescription = "TCP port" };
         portField.AddView(port);
         queueField.AddView(new TextView(this) { Text = "Buffer blocks (1–1024)", TextSize = 16 });
-        queueBlocks = new EditText(this) { Text = "32", InputType = InputTypes.ClassNumber, ContentDescription = "Output buffer blocks" };
+        queueBlocks = new EditText(this) { Id = Resource.Id.queue_blocks, Text = "32", InputType = InputTypes.ClassNumber, ContentDescription = "Output buffer blocks" };
         queueField.AddView(queueBlocks);
         connectionFields.AddView(portField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         connectionFields.AddView(queueField, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         root.AddView(connectionFields);
-        lan = new CheckBox(this) { Text = "Listen on all interfaces (LAN / WireGuard)", Checked = true };
-        analog = new CheckBox(this) { Text = "Start with analog AGC", Checked = true };
-        digital = new CheckBox(this) { Text = "Start with digital AGC", Checked = true };
+        lan = new CheckBox(this) { Id = Resource.Id.listen_lan, Text = "Listen on all interfaces (LAN / WireGuard)", Checked = true };
+        analog = new CheckBox(this) { Id = Resource.Id.analog_agc, Text = "Start with analog AGC", Checked = true };
+        digital = new CheckBox(this) { Id = Resource.Id.digital_agc, Text = "Start with digital AGC", Checked = true };
         var preferences = GetSharedPreferences("server", FileCreationMode.Private)!;
         port.Text = preferences.GetString("port", "12346");
         queueBlocks.Text = preferences.GetInt("queueBlocks", 32).ToString();
@@ -79,8 +79,10 @@ public sealed class MainActivity : Activity
         buttons.AddView(stop, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         root.AddView(buttons);
         var helpButtons = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        var battery = new Button(this) { Text = "Battery settings" };
+        var battery = new Button(this) { Text = "Battery" };
         var about = new Button(this) { Text = "About" };
+        advanced = new Button(this) { Text = "Radio" };
+        advanced.Click += (_, _) => StartupOptions.Show(this);
         battery.Click += (_, _) => new AlertDialog.Builder(this)
             .SetTitle("Background streaming")!
             .SetMessage("In Android's battery optimization settings, select All apps if needed, find mayhem_tcp, and choose Don't optimize or Unrestricted. Labels vary by phone. This may help background streaming and increases battery use; it does not guarantee uninterrupted operation.")!
@@ -94,6 +96,7 @@ public sealed class MainActivity : Activity
             .SetNegativeButton("Close", (_, _) => { })!.Show();
         helpButtons.AddView(battery, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         helpButtons.AddView(about, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+        helpButtons.AddView(advanced, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         root.AddView(helpButtons);
         status = new TextView(this) { TextSize = 17 };
         addresses = new TextView(this) { TextSize = 13 };
@@ -201,6 +204,7 @@ public sealed class MainActivity : Activity
         catch (Exception error) { ServerState.Log($"Native library error: {error.Message}"); }
         SetText(status, pending ? "Waiting for USB permission…" : ServerState.Status);
         start.Enabled = !ServerState.Active && !pending;
+        advanced.Enabled = !ServerState.Active && !pending;
         port.Enabled = queueBlocks.Enabled = lan.Enabled = analog.Enabled = digital.Enabled = !ServerState.Active && !pending;
         var logText = ServerState.LogText();
         if (logs.Text != logText)

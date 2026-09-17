@@ -38,6 +38,8 @@ pub struct Settings {
     pub digital_agc: bool,
     pub ppm: i32,
     pub bias_tee: bool,
+    pub offset_tuning: bool,
+    pub test_mode: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -49,6 +51,8 @@ impl Default for Settings {
             digital_agc: false,
             ppm: 0,
             bias_tee: false,
+            offset_tuning: false,
+            test_mode: false,
         }
     }
 }
@@ -57,8 +61,8 @@ impl Settings {
         if self.frequency < 1_000_000 {
             return Err("Frequency must be 1 MHz..4294967295 Hz".into());
         }
-        if !(240_000..=3_200_000).contains(&self.rate) {
-            return Err("Output rate must be 240000..3200000 Hz".into());
+        if !(225_001..=3_200_000).contains(&self.rate) {
+            return Err("Output rate must be 225001..3200000 Hz".into());
         }
         if !(0..=1020).contains(&self.gain_tenths) {
             return Err("Gain must be 0..102 dB".into());
@@ -80,9 +84,41 @@ impl Settings {
     }
 
     pub fn corrected_frequency(&self) -> u64 {
-        // RTL-style ppm denotes clock error: a fast clock requires a lower
-        // nominal tuning request. This corrects tuning, not ADC sample timing.
-        (self.frequency as f64 / (1.0 + self.ppm as f64 / 1_000_000.0)).round() as u64
+        // Offset capture places the wanted centre at -Fs/4, then DSP shifts it up.
+        let offset = if self.offset_tuning {
+            self.hardware_rate().0 / 4
+        } else {
+            0
+        };
+        ((self.frequency as u64 + offset as u64) as f64 / (1.0 + self.ppm as f64 / 1_000_000.0))
+            .round() as u64
+    }
+
+    pub fn sample_clock(&self) -> (u32, u32) {
+        let rate = self.hardware_rate().0;
+        if self.ppm == 0 {
+            return (rate, 1);
+        }
+        // HackRF's fractional-rate request. 1/16 Hz resolution, bounded u32 numerator.
+        (
+            ((rate as f64 * 16.0) / (1.0 + self.ppm as f64 / 1_000_000.0)).round() as u32,
+            16,
+        )
+    }
+
+    pub fn analog_bandwidth(&self) -> u32 {
+        let required = if self.offset_tuning {
+            self.hardware_rate().0 / 2 + self.rate
+        } else {
+            self.rate
+        };
+        [
+            1_750_000, 2_500_000, 3_500_000, 5_000_000, 5_500_000, 6_000_000, 7_000_000, 8_000_000,
+            9_000_000, 10_000_000, 12_000_000,
+        ]
+        .into_iter()
+        .find(|&b| b >= required)
+        .unwrap()
     }
 
     pub fn gains(&self) -> (u16, u16) {
@@ -105,6 +141,7 @@ impl Settings {
             || self.rate != previous.rate
             || self.ppm != previous.ppm
             || self.bias_tee != previous.bias_tee
+            || self.offset_tuning != previous.offset_tuning
     }
 
     pub fn command(&mut self, command: Command, allow_bias: bool) -> Result<Option<&'static str>> {
@@ -126,6 +163,27 @@ impl Settings {
             }
             0x04 => next.gain_tenths = command.value as i32,
             0x05 => next.ppm = command.value as i32,
+            0x07 | 0x0a => {
+                if command.value > 1 {
+                    return Err("Mode must be 0 (off) or 1 (on)".into());
+                }
+                if command.id == 0x07 {
+                    next.test_mode = command.value != 0;
+                } else {
+                    next.offset_tuning = command.value != 0;
+                }
+            }
+            0x06 => return Ok(Some("RTL IF-stage gain has no HackRF mapping; ignored")),
+            0x09 => {
+                return Ok(Some(
+                    "RTL direct sampling has no HackRF equivalent; ignored",
+                ));
+            }
+            0x0b | 0x0c => {
+                return Ok(Some(
+                    "RTL crystal settings do not control HackRF; use PPM correction",
+                ));
+            }
             0x0d => {
                 next.gain_tenths = *GAINS
                     .get(command.value as usize)
@@ -153,6 +211,53 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn offset_clock_plans_and_modes_are_transactional() {
+        for rate in [225_001, 240_000, 250_000, 2_048_000, 3_200_000] {
+            for ppm in [-1000, -10, 0, 10, 1000] {
+                for frequency in [1_000_000, 100_000_000, u32::MAX] {
+                    let settings = Settings {
+                        rate,
+                        ppm,
+                        frequency,
+                        offset_tuning: true,
+                        ..Settings::default()
+                    };
+                    settings.validate().unwrap();
+                    let (nominal, _) = settings.hardware_rate();
+                    let (num, den) = settings.sample_clock();
+                    let corrected = num as f64 / den as f64 * (1.0 + ppm as f64 / 1_000_000.0);
+                    assert!((corrected - nominal as f64).abs() < 0.04);
+                    assert!(settings.corrected_frequency() < 6_000_000_000);
+                    assert!(settings.analog_bandwidth() >= nominal / 2 + rate);
+                }
+            }
+        }
+        let mut settings = Settings::default();
+        let initial = settings.clone();
+        settings
+            .command(Command { id: 7, value: 1 }, false)
+            .unwrap();
+        assert!(settings.test_mode);
+        assert!(!settings.requires_restart(&initial));
+        settings
+            .command(Command { id: 10, value: 1 }, false)
+            .unwrap();
+        assert!(settings.offset_tuning && settings.requires_restart(&initial));
+        let before = settings.clone();
+        for id in [7, 10] {
+            assert!(settings.command(Command { id, value: 2 }, false).is_err());
+        }
+        for id in [6, 9, 11, 12] {
+            assert!(
+                settings
+                    .command(Command { id, value: 123 }, false)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        assert_eq!(settings, before);
+    }
     #[test]
     fn automatic_mode_preserves_manual_gain_and_digital_is_independent() {
         let mut settings = Settings::default();
@@ -219,7 +324,7 @@ mod tests {
         let mut settings = Settings::default();
         for (id, value) in [
             (2, 0),
-            (2, 239_999),
+            (2, 225_000),
             (2, u32::MAX),
             (1, 0),
             (13, 29),

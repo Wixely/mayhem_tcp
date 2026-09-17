@@ -16,6 +16,11 @@ top-level console program.
 
 ## Install and try
 
+The app follows the device's light/dark appearance automatically, including
+native controls, dialogs and system-bar icon contrast. Main-screen edits are
+restored when a theme change recreates the activity. Radio dialog changes
+should be saved before switching themes.
+
 1. Copy `.local/android/mayhem_tcp-android-arm64-test.apk` to the phone and
    install it, allowing installation from your chosen file/browser app if asked.
    This is a self-contained test APK signed with the local Android debug key;
@@ -30,23 +35,34 @@ top-level console program.
    Start with **2.048 MS/s**. Both AGCs start enabled; clients can override them.
 5. Stop from the app or its persistent notification before disconnecting USB.
 
+Tap **Radio** while stopped to set initial frequency, output rate, manual gain,
+PPM, USB buffer count, offset tuning, test mode and antenna-power opt-in. These
+settings are saved for the next server start; clients can override the applicable
+radio settings. PPM now corrects tuning and sample-clock requests. Test mode sends
+a byte counter instead of IQ; offset tuning moves capture away from the hardware
+centre spike and digitally recentres the wanted band. The minimum supported
+output rate is 225001 S/s. See the [Osmocom parity matrix](../docs/osmocom-parity.md)
+for RTL-specific controls and behavioral differences that remain.
+
 **Buffer blocks** sets the output queue capacity (1–1024, default 32) for the
 next server start and is saved with the other settings. Try 64 for brief network
 stalls; larger queues can use more memory and add latency during congestion.
 They cannot compensate for a connection that is consistently too slow.
 Clients can now request 240 kS/s; invalid settings are logged and ignored while
-the previous configuration continues streaming. These changes need testing
-with the updated APK on the physical phone.
+the previous configuration continues streaming. Both were verified on the
+physical phone over LAN with 32- and 64-block queues. Saving/restoring that
+setting across an app restart remains to be tested on the phone.
 
 No radio is simulated: without a HackRF the app reports that no device was
 found. Only one HackRF and one active TCP client are supported. USB denial,
 unplug and bind failures are shown in the log. Frequency, amplifier, antenna
 power and supported sample-rate limits are the same as the desktop server.
+Android antenna power remains off/blocked unless explicitly allowed in Radio settings.
 There is no transmit or firmware-writing feature.
 
 ## WireGuard / mobile data
 
-For background streaming, tap **Battery settings** for instructions and a shortcut
+For background streaming, tap **Battery** for instructions and a shortcut
 to Android's battery optimization list. Select mayhem_tcp (choose All apps if
 needed), then Don't optimize or Unrestricted; wording varies by phone. If that
 settings page is unavailable, the shortcut opens app details instead. Settings
@@ -141,8 +157,28 @@ disabled WireGuard on the phone, a TCP connection to the LAN address on port
 12346 succeeded, returned the RTL0 greeting and delivered 7,300 bytes of IQ.
 This verifies a short LAN connection and data reception, not sustained LAN
 throughput. No private addresses are included in this record.
-Screen-off behavior, notification Stop, unplug,
-long-duration throughput and network handover remain unverified on hardware.
+An updated-APK LAN regression on 2026-09-17 subsequently passed with the user
+confirming 32 buffer blocks: 240/250 kS/s and 2/2.048/2.4/3.2 MS/s rate requests,
+fragmented/coalesced commands, gain/AGC toggles, retuning, three reconnects,
+invalid-command recovery, stalled-client disconnection, and rejection of a
+second client without disrupting the first. At 240 kS/s, 239,955 samples/s
+were measured over four seconds. Six consecutive ten-second measurements at
+2.048 MS/s ranged from 2,047,559 to 2,048,819 samples/s without disconnecting.
+Samples were counted and discarded; RF accuracy and losslessness were not measured.
+A repeat on 2026-09-17 with the user reporting **64 buffer blocks and the app
+in the background** passed the same full suite. Six ten-second windows at
+2.048 MS/s measured 2,047,935–2,049,532 samples/s without a disconnect; the
+240 kS/s sweep measurement was 240,039 samples/s. This verifies short background
+operation in that setup. Screen state, Doze and battery settings were not recorded,
+so it does not establish screen-off reliability or the cause of earlier failures.
+A subsequent user-coordinated lock-screen test on 2026-09-17 streamed over LAN
+at 2.048 MS/s for over three minutes with the same 64-block setup. All eighteen
+ten-second measurement windows passed (2,046,464–2,049,567 samples/s), followed
+by a successful fresh connection and five seconds of IQ. The phone's lock state
+was coordinated with the user, not independently queried through ADB. This is
+a short lock-screen test, not proof of Doze or overnight reliability.
+Notification Stop, unplug, long-duration throughput and network handover remain
+unverified on hardware.
 
 Android owns `UsbDeviceConnection`; Rust duplicates its descriptor before
 returning from `mt_create`. The service keeps the Android connection open until
@@ -153,15 +189,25 @@ The non-sticky foreground service does not restart automatically without a
 fresh user action and USB permission. CPU wake lock ownership ends with the
 server worker; the screen need not stay on.
 
-**User next action:** test retuning, AGC toggles, screen-off streaming, client reconnect, USB
-unplug and notification Stop. Share the in-app log and phone model if a step
-fails. **Codex next action:** fix findings and measure throughput/thermal
-behavior before a stable Android release. Short ARM64 hardware/VPN streaming
-and LAN reception with WireGuard disabled are verified as described above.
+Remaining reliability tests (longer screen-off sessions, physical-device setting
+persistence, USB unplug and notification Stop) are **deferred at the user's
+request**. The parity-update APK subsequently passed physical LAN checks for
+225001 S/s, offset-mode streaming, PPM changes, test-counter continuity, invalid
+commands, return to ordinary IQ and reconnects; see the parity matrix for results.
+The subsequent user-configured 8-USB-buffer test (64 output queue blocks)
+passed rate/mode changes, counter continuity, reconnecting and a minute at
+3.2 MS/s; see [validation details](../docs/validation.md).
+Calibrated frequency/sample-clock testing is deferred at the user's request.
+**Codex next action:** extend protocol regression coverage and test an unmodified
+rtl_tcp client against Android. Other non-default USB counts remain untested.
+Earlier short ARM64 hardware/VPN, LAN and locked-screen streaming results apply
+to the previously tested build; the new parity run verifies streaming behavior,
+not RF calibration or a repeat of all Android reliability tests.
 
 ## GitHub Android builds
 
-Pushing an `android-*` tag triggers the Android APK workflow; it can also be
+Pushing a `v*` tag builds Windows and Android together in one GitHub prerelease.
+Pushing an `android-*` tag triggers the standalone Android APK workflow; it can also be
 rerun manually with that tag selected. It installs the pinned Rust/.NET/Android
 toolchains, checks the shared code, builds ARM64, verifies the APK signature and
 publishes a prerelease with APK, checksums and dependency/runtime license notices.

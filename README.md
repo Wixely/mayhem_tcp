@@ -1,5 +1,9 @@
 # mayhem_tcp
 
+<p align="center">
+  <img src="assets/branding/mayhem_crab.png" alt="mayhem_tcp red circuit crab logo" width="160" />
+</p>
+
 A Rust proof of concept that makes a HackRF One available to **existing rtl_tcp
 clients**. Tested on Windows with PortaPack Mayhem **v2.4.0**, USB API **0x0111**,
 and the existing WinUSB driver. Reviewed: **2026-09-17**.
@@ -53,17 +57,24 @@ cargo build --release --locked
 
 ## Scope and limitations
 
-An experimental Android 16 USB-host app is available on the Android development
-branch. See [Android build and test instructions](android/README.md) for the
+An experimental Android 16 USB-host app is included on main and in the GitHub
+release downloads. See [Android build and test instructions](android/README.md) for the
 ARM64 test APK, foreground service and WireGuard setup. A short physical-device
 stream over WireGuard has been verified at 2.048 MS/s. Direct phone-LAN access
 also worked after disabling WireGuard on the phone; see the Android instructions
 for the tested connection modes.
 
 - One receive client at a time. No transmission or firmware-writing features.
-- Output rates **240 kS/s through 3.2 MS/s**; USB capture uses a power-of-two
+- Output rates **225001 S/s through 3.2 MS/s**; USB capture uses a power-of-two
   multiple at least 8 MS/s, followed by a real low-pass decimator.
-- Tuning, analog AGC, manual gain/gain index and tuning-only PPM correction are implemented.
+- Tuning, analog AGC, manual gain/gain index and tuning/sample-clock PPM correction are implemented.
+- Offset tuning (`--offset-tuning`, client command 0x0a) shifts capture away from
+  the hardware centre spike, then digitally recentres the wanted band.
+- Test mode (`--test-mode`, client command 0x07) replaces IQ with a byte counter
+  paced by USB reception; it checks network continuity, not hardware sample loss.
+- Osmocom-style `-P` (startup PPM), `-b` (USB buffers), `-d` (device index/serial)
+  and `-T` (explicit startup antenna power) are available. See the
+  [parity matrix and remaining differences](docs/osmocom-parity.md).
 - Analog AGC adjusts LNA/VGA from raw IQ levels. Enable it in the client or
   start with `--agc` (clients can override).
 - Digital IQ AGC is independently controlled by the client's **Digital/RTL AGC**

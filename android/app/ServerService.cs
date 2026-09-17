@@ -67,6 +67,9 @@ public sealed class ServerService : Service
                     (byte)((intent?.GetBooleanExtra("digital", true) ?? true) ? 1 : 0),
                     checked((uint)(intent?.GetIntExtra("queueBlocks", 32) ?? 32)));
                 if (handle == 0) throw new InvalidOperationException("Could not create native server; see log");
+                var options = StartupOptions.Load(this);
+                if (Native.Configure(handle, ref options) != 0)
+                    throw new InvalidOperationException("Invalid startup settings; see log");
             }
             var power = (PowerManager)GetSystemService(PowerService)!;
             wakeLock = power.NewWakeLock(WakeLockFlags.Partial, "mayhem_tcp:usb_rx");

@@ -22,6 +22,7 @@ try {
     Copy-Item target/x86_64-pc-windows-msvc/release/mayhem_tcp.exe $bundle
     Copy-Item README.md,LICENSE -Destination $bundle
     Copy-Item docs -Destination $bundle -Recurse
+    Copy-Item assets -Destination $bundle -Recurse
     $notices = Join-Path $bundle 'licenses'
     New-Item -ItemType Directory -Path $notices | Out-Null
     $summary = @('Third-party dependency licenses', '')
